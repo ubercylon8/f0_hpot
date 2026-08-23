@@ -120,6 +120,41 @@ export function registerTokenRoutes(
   });
 
   // Internal: gateway artifact rendering needs the token type + config.
+  app.get("/api/v1/incidents", async (request) => {
+    const query = request.query as { limit?: string; acknowledged?: string };
+    const limit = Math.min(Number(query.limit ?? 200) || 200, 500);
+    let stmt = db
+      .select({
+        id: incidents.id,
+        tokenId: incidents.tokenId,
+        tokenType: tokens.type,
+        severity: incidents.severity,
+        acknowledged: incidents.acknowledged,
+        event: incidents.event,
+        seenAt: incidents.seenAt,
+      })
+      .from(incidents)
+      .innerJoin(tokens, eq(incidents.tokenId, tokens.id))
+      .orderBy(desc(incidents.seenAt))
+      .limit(limit)
+      .$dynamic();
+    if (query.acknowledged === "false") {
+      stmt = stmt.where(eq(incidents.acknowledged, false));
+    }
+    return stmt.all();
+  });
+
+  app.patch("/api/v1/incidents/:id/ack", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = db
+      .update(incidents)
+      .set({ acknowledged: true })
+      .where(eq(incidents.id, id))
+      .run();
+    if (result.changes === 0) return reply.notFound("incident not found");
+    return reply.send({ ok: true });
+  });
+
   app.get("/api/v1/tokens/:id/internal-config", async (request, reply) => {
     const { id } = request.params as { id: string };
     const row = db
