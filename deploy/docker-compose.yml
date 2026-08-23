@@ -1,0 +1,57 @@
+name: f0-deception
+
+x-env: &shared-env
+  F0_TOKEN_DOMAINS: ${F0_TOKEN_DOMAINS:?set in .env}
+  F0_GATEWAY_ORIGIN: ${F0_GATEWAY_ORIGIN:-}
+  F0_GATEWAY_IP: ${F0_GATEWAY_IP:-}
+  F0_API_BASE_URL: http://api:8443
+  F0_MAIL_DOMAINS: ${F0_MAIL_DOMAINS:-}
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      <<: *shared-env
+      F0_API_PORT: 8443
+      F0_DB_PATH: /data/f0_deception.db
+      F0_MAX_ALERTS_PER_MINUTE: ${F0_MAX_ALERTS_PER_MINUTE:-1}
+    volumes:
+      - api-data:/data
+    expose:
+      - "8443"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: gateway
+    restart: unless-stopped
+    environment:
+      <<: *shared-env
+      F0_HTTP_PORT: 80
+      F0_DNS_PORT: 53
+      F0_SMTP_PORT: ${F0_SMTP_PORT:-2525}
+    ports:
+      - "80:80"        # token trigger URLs
+      - "53:53/udp"    # DNS tokens (authoritative for your token domain)
+      - "${F0_SMTP_PORT:-2525}:${F0_SMTP_PORT:-2525}" # email tokens
+
+  console:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+    restart: unless-stopped
+    environment:
+      API_ORIGIN: http://api:8443
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set in .env}
+    ports:
+      - "443:443"
+      - "8080:80"
+
+volumes:
+  api-data:
