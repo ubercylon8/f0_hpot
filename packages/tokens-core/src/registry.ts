@@ -4,6 +4,7 @@ import {
   dnsToken,
   fastRedirectToken,
   qrCodeToken,
+  emailToken,
   sensitiveCmdToken,
 } from "./network-tokens.js";
 import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResult } from "./types.js";
@@ -20,6 +21,7 @@ const definitions: TokenTypeDefinition[] = [
   dnsToken,
   fastRedirectToken,
   qrCodeToken,
+  emailToken,
   sensitiveCmdToken,
 ];
 

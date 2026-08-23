@@ -1,5 +1,6 @@
 import { startHttpServer } from "./http.js";
 import { startDnsServer, extractTokenHints } from "./dns.js";
+import { startSmtpServer } from "./smtp.js";
 import { extractTokenHints as extractHostHints } from "./http.js";
 import { artifactResponder } from "./artifacts.js";
 import { matchEventToType } from "@f0/deception-tokens-core";
@@ -38,7 +39,9 @@ function onEvent(event: Parameters<typeof matchEventToType>[0]): void {
       ? extractTokenHints(event.dns?.queryName ?? "", baseDomains)
       : event.kind === "http"
         ? extractHostHints(event.http?.host ?? "", baseDomains)
-        : [];
+        : event.kind === "smtp"
+          ? [event.smtp?.to.split("@")[0] ?? ""]
+          : [];
   const seen = new Set<string>();
   for (const tokenId of candidates) {
     if (!tokenId || seen.has(tokenId)) continue;
@@ -68,3 +71,14 @@ startDnsServer({
   onEvent,
 });
 console.log(`gateway DNS listening on udp/:${dnsPort}`);
+
+const smtpPort = Number(process.env.F0_SMTP_PORT ?? 2525);
+startSmtpServer({
+  port: smtpPort,
+  mailDomains: (process.env.F0_MAIL_DOMAINS ?? baseDomains.join(","))
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean),
+  onEvent,
+});
+console.log(`gateway SMTP listening on :${smtpPort}`);

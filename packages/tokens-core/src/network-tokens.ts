@@ -123,6 +123,34 @@ export const qrCodeToken: TokenTypeDefinition = {
   },
 };
 
+export const emailToken: TokenTypeDefinition = {
+  id: "email",
+  label: "Unique Email Address",
+  description:
+    "A unique email address. Any mail sent to it triggers an alert (requires MX records pointing at the gateway).",
+  group: "network",
+  configSchema: emptyConfig,
+  generate(ctx) {
+    const mailDomain = ctx.config["mail_domain"]
+      ? String(ctx.config["mail_domain"])
+      : ctx.baseDomain;
+    return [
+      {
+        kind: "url",
+        label: "Trigger email address",
+        value: `${ctx.tokenId}@${mailDomain}`,
+      },
+    ];
+  },
+  matchTrigger(event, tokenId) {
+    if (event.kind !== "smtp") return { matched: false };
+    if (!eventMentionsToken(event, tokenId)) return { matched: false };
+    if (!event.smtp) return { matched: false };
+    if (!event.smtp.to.split("@")[0]?.includes(tokenId)) return { matched: false };
+    return { matched: true, severity: "high" };
+  },
+};
+
 export const sensitiveCmdToken: TokenTypeDefinition = {
   id: "sensitive_cmd",
   label: "Sensitive Command",
