@@ -73,6 +73,8 @@ func main() {
 
 	sensors.Register(sensors.HTTPLoginSensor{})
 	sensors.Register(sensors.SSHSensor{})
+	sensors.Register(sensors.PlantedCredentialSensor{})
+	sensors.Register(sensors.FileWatchSensor{})
 
 	poll := 60 * time.Second
 	var currentSpecs []api.SensorSpec
