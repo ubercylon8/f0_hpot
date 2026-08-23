@@ -1,5 +1,11 @@
 import type { TokenType } from "@f0/deception-shared";
-import { webBugToken, dnsToken, fastRedirectToken } from "./network-tokens.js";
+import {
+  webBugToken,
+  dnsToken,
+  fastRedirectToken,
+  qrCodeToken,
+  sensitiveCmdToken,
+} from "./network-tokens.js";
 import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResult } from "./types.js";
 
 export type {
@@ -9,7 +15,13 @@ export type {
   MatchResult,
 };
 
-const definitions: TokenTypeDefinition[] = [webBugToken, dnsToken, fastRedirectToken];
+const definitions: TokenTypeDefinition[] = [
+  webBugToken,
+  dnsToken,
+  fastRedirectToken,
+  qrCodeToken,
+  sensitiveCmdToken,
+];
 
 const registry = new Map<string, TokenTypeDefinition>(
   definitions.map((d) => [d.id, d]),

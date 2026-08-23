@@ -14,11 +14,13 @@
     "@f0/deception-shared": "workspace:*",
     "@f0/deception-tokens-core": "workspace:*",
     "dns-packet": "^5.6.0",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/dns-packet": "^5.6.5",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
     "vitest": "^3.0.0"

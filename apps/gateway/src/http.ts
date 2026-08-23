@@ -10,7 +10,7 @@ export interface HttpServerOptions {
    * Serves the actual artifact response (pixel gif, redirect, document...).
    * Return false if the request should be answered with a generic 404.
    */
-  respond(req: http.IncomingMessage, res: http.ServerResponse): boolean;
+  respond(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean>;
 }
 
 /**
@@ -21,7 +21,7 @@ export interface HttpServerOptions {
  * Hardening: strict size caps, no proxy trust, no dynamic file access.
  */
 export function startHttpServer(opts: HttpServerOptions): http.Server {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const host = (req.headers.host ?? "").toLowerCase().split(":")[0] ?? "";
     const isOurs = opts.baseDomains.some(
       (d) => host === d || host.endsWith(`.${d}`),
@@ -54,7 +54,7 @@ export function startHttpServer(opts: HttpServerOptions): http.Server {
 
     let served = false;
     try {
-      served = opts.respond(req, res);
+      served = await opts.respond(req, res);
     } catch {
       served = false;
     }

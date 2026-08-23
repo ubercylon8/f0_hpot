@@ -119,8 +119,19 @@ export function registerTokenRoutes(
     return reply.send({ ok: true });
   });
 
-  app.get("/api/v1/tokens/:id/incidents", async (request, reply) => {
+  // Internal: gateway artifact rendering needs the token type + config.
+  app.get("/api/v1/tokens/:id/internal-config", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const row = db
+      .select({ type: tokens.type, config: tokens.config, status: tokens.status })
+      .from(tokens)
+      .where(eq(tokens.id, id))
+      .get();
+    if (!row || row.status !== "active") return reply.notFound();
+    return { type: row.type, config: row.config };
+  });
+
+  app.get("/api/v1/tokens/:id/incidents", async (request, reply) => {    const { id } = request.params as { id: string };
     const rows = db
       .select()
       .from(incidents)

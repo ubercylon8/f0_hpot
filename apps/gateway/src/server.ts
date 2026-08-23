@@ -58,7 +58,7 @@ startHttpServer({
   port: httpPort,
   baseDomains,
   onEvent,
-  respond: artifactResponder({ gatewayOrigin }),
+  respond: artifactResponder({ gatewayOrigin, apiBaseUrl }),
 }).listen(httpPort, () => console.log(`gateway HTTP listening on :${httpPort}`));
 
 startDnsServer({

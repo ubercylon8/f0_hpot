@@ -2,14 +2,12 @@ import { z } from "zod";
 import type { TriggerEvent } from "@f0/deception-shared";
 import type { TokenTypeDefinition, MatchResult, GenerateContext } from "./types.js";
 
-const emptyConfig = z.object({});
-
 function defaultHostname(ctx: GenerateContext): string {
   return `${ctx.tokenId}.${ctx.baseDomain}`;
 }
 
 /**
- * A trigger matches a token when the token hint appears in the event
+ * A trigger matches a token when the token id appears in the event
  * (as a hostname/query-name label, or a URL path segment).
  */
 export function eventMentionsToken(event: TriggerEvent, tokenId: string): boolean {
@@ -19,15 +17,11 @@ export function eventMentionsToken(event: TriggerEvent, tokenId: string): boolea
   return false;
 }
 
-export function matchByTokenHint(
-  event: TriggerEvent,
-  tokenId: string,
-): MatchResult {
-  if (eventMentionsToken(event, tokenId)) {
-    return { matched: true, severity: "medium" };
-  }
-  return { matched: false };
+function httpOf(event: TriggerEvent) {
+  return event.kind === "http" ? event.http : undefined;
 }
+
+const emptyConfig = z.object({});
 
 export const webBugToken: TokenTypeDefinition = {
   id: "web_bug",
@@ -41,9 +35,9 @@ export const webBugToken: TokenTypeDefinition = {
     return [{ kind: "url", label: "Tracking pixel URL", value: url }];
   },
   matchTrigger(event, tokenId) {
-    const http = event.kind === "http" ? event.http : undefined;
+    const http = httpOf(event);
     if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
-    if (!http.path.includes(tokenId)) return { matched: false };
+    if (!http.path.startsWith(`/${tokenId}/pixel.gif`)) return { matched: false };
     return { matched: true, severity: "medium" };
   },
 };
@@ -92,9 +86,68 @@ export const fastRedirectToken: TokenTypeDefinition = {
     ];
   },
   matchTrigger(event, tokenId) {
-    const http = event.kind === "http" ? event.http : undefined;
+    const http = httpOf(event);
     if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
     if (!http.path.startsWith(`/${tokenId}/r`)) return { matched: false };
     return { matched: true, severity: "medium" };
+  },
+};
+
+export const qrCodeToken: TokenTypeDefinition = {
+  id: "qr_code",
+  label: "QR Code",
+  description:
+    "A unique QR code. Scanning it (or fetching the encoded URL) triggers an alert.",
+  group: "document",
+  configSchema: emptyConfig,
+  generate(ctx) {
+    const targetUrl = `${ctx.gatewayOrigin}/${ctx.tokenId}/qr`;
+    return [
+      {
+        kind: "url",
+        label: "Encoded trigger URL",
+        value: targetUrl,
+      },
+      {
+        kind: "file_download",
+        label: "QR code image",
+        value: `/api/v1/tokens/${ctx.tokenId}/artifact/qr.png`,
+      },
+    ];
+  },
+  matchTrigger(event, tokenId) {
+    const http = httpOf(event);
+    if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
+    if (!http.path.startsWith(`/${tokenId}/qr`)) return { matched: false };
+    return { matched: true, severity: "high" };
+  },
+};
+
+export const sensitiveCmdToken: TokenTypeDefinition = {
+  id: "sensitive_cmd",
+  label: "Sensitive Command",
+  description:
+    "Serves a fake command output page. Triggered when someone executes or fetches the planted command URL (e.g. a bookmarklet, alias, or documentation link).",
+  group: "network",
+  configSchema: z.object({
+    cmd_name: z
+      .enum(["ifconfig", "ipconfig", "whoami", "cat_etc_shadow"])
+      .default("ifconfig"),
+  }),
+  generate(ctx) {
+    const cmd = String(ctx.config["cmd_name"] ?? "ifconfig");
+    return [
+      {
+        kind: "url",
+        label: `${cmd} trigger URL`,
+        value: `${ctx.gatewayOrigin}/${ctx.tokenId}/cmd/${cmd}`,
+      },
+    ];
+  },
+  matchTrigger(event, tokenId) {
+    const http = httpOf(event);
+    if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
+    if (!http.path.startsWith(`/${tokenId}/cmd/`)) return { matched: false };
+    return { matched: true, severity: "high" };
   },
 };
