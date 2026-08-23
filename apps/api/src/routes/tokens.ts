@@ -10,8 +10,14 @@ import { getTokenType } from "@f0/deception-tokens-core";
 import type { Db } from "../db/index.js";
 import { tokens, incidents } from "../db/schema.js";
 import { newTokenId } from "../ids.js";
+import type { AlertDispatcher } from "../alerts/dispatcher.js";
+import type { TriggerEvent } from "@f0/deception-shared";
 
-export function registerTokenRoutes(app: FastifyInstance, db: Db): void {
+export function registerTokenRoutes(
+  app: FastifyInstance,
+  db: Db,
+  dispatcher: AlertDispatcher,
+): void {
   app.post("/api/v1/tokens", async (request, reply) => {
       const parsed = z
         .object({
@@ -157,6 +163,17 @@ export function registerTokenRoutes(app: FastifyInstance, db: Db): void {
           seenAt: new Date().toISOString(),
         })
         .run();
+
+      // Fire-and-forget alerting; incident is already durably recorded.
+      void dispatcher.dispatch({
+        tokenId: token.id,
+        tokenType: token.type,
+        severity: parsed.data.severity,
+        incidentId,
+        seenAt: new Date().toISOString(),
+        event: parsed.data.event as TriggerEvent,
+      });
+
       return reply.code(201).send({ id: incidentId });
   });
 }

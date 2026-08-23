@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import sensible from "@fastify/sensible";
 import { createDb, migrate } from "./db/index.js";
 import { registerTokenRoutes } from "./routes/tokens.js";
+import { registerAlertRoutes } from "./routes/alerts.js";
+import { AlertDispatcher } from "./alerts/dispatcher.js";
 
 export function buildServer(opts: { dbPath?: string } = {}) {
   const dbPath = opts.dbPath ?? process.env.F0_DB_PATH ?? "./f0_deception.db";
@@ -13,7 +15,11 @@ export function buildServer(opts: { dbPath?: string } = {}) {
     bodyLimit: 1024 * 1024,
   });
   app.register(sensible);
-  registerTokenRoutes(app, db);
+  const dispatcher = new AlertDispatcher(db, {
+    maxAlertsPerMinute: Number(process.env.F0_MAX_ALERTS_PER_MINUTE ?? 1),
+  });
+  registerTokenRoutes(app, db, dispatcher);
+  registerAlertRoutes(app, db, dispatcher);
 
   return { app, db };
 }
