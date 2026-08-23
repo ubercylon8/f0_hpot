@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || freebsd || netbsd || openbsd
 
 package sensors
 
@@ -10,7 +10,7 @@ import (
 
 func atimeOf(fi os.FileInfo) string {
 	if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return time.Unix(sys.Atim.Sec, sys.Atim.Nsec).UTC().Format(time.RFC3339Nano)
+		return time.Unix(sys.Atimespec.Sec, sys.Atimespec.Nsec).UTC().Format(time.RFC3339Nano)
 	}
 	return ""
 }

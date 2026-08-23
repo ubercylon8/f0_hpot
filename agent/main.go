@@ -21,7 +21,17 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	serverURL := flag.String("server", "", "console API base URL (enrollment)")
 	enrollToken := flag.String("enroll", "", "one-time enrollment token (enrollment)")
+	install := flag.Bool("install", false, "install as a system service")
+	uninstall := flag.Bool("uninstall", false, "remove the system service")
 	flag.Parse()
+
+	if *uninstall {
+		if err := uninstallService(); err != nil {
+			log.Fatalf("uninstall: %v", err)
+		}
+		log.Println("service removed")
+		return
+	}
 
 	state, err := config.Load()
 	if err != nil {
@@ -44,6 +54,16 @@ func main() {
 			log.Fatalf("persist state: %v", err)
 		}
 		log.Printf("enrolled as %s; state saved", id)
+	}
+
+	if *install {
+		if !state.Enrolled() {
+			log.Fatal("--install requires prior enrollment (--server/--enroll)")
+		}
+		if err := installService(); err != nil {
+			log.Fatalf("install: %v", err)
+		}
+		log.Println("service installed and started")
 		return
 	}
 
