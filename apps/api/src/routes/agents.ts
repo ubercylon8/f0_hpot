@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/index.js";
-import { agents } from "../db/schema.js";
+import { agents, agentSensors } from "../db/schema.js";
+import { newId } from "../ids.js";
 
 export function hashAgentKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
@@ -100,26 +101,25 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       .where(eq(agents.id, agent.id))
       .run();
 
-    // v1: sensors are configured via env JSON (fleet UI comes in P4 proper).
-    let sensorConfig: unknown = [];
-    try {
-      if (process.env.F0_AGENT_SENSORS) {
-        sensorConfig = SENSOR_CONFIG_SCHEMA.parse(
-          JSON.parse(process.env.F0_AGENT_SENSORS),
-        );
-      }
-    } catch (err) {
-      request.log.warn(`invalid F0_AGENT_SENSORS: ${String(err)}`);
-    }
+    // Sensor configuration is fleet-managed via the console (DB-backed).
+    const sensors = db
+      .select({
+        kind: agentSensors.kind,
+        enabled: agentSensors.enabled,
+        config: agentSensors.config,
+      })
+      .from(agentSensors)
+      .where(eq(agentSensors.agentId, agent.id))
+      .all();
 
     return reply.send({
       poll_interval_seconds: Number(process.env.F0_AGENT_POLL_INTERVAL ?? 60),
-      sensors: sensorConfig,
+      sensors,
     });
   });
 
   app.get("/api/v1/agents", async () => {
-    return db
+    const rows = db
       .select({
         id: agents.id,
         hostname: agents.hostname,
@@ -130,5 +130,43 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       })
       .from(agents)
       .all();
+    return rows.map((a) => ({
+      ...a,
+      sensors: db
+        .select()
+        .from(agentSensors)
+        .where(eq(agentSensors.agentId, a.id))
+        .all(),
+    }));
+  });
+
+  // Replace the sensor set for an agent.
+  app.put("/api/v1/agents/:id/sensors", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!db.select().from(agents).where(eq(agents.id, id)).get()) {
+      return reply.notFound("agent not found");
+    }
+    const parsed = z
+      .object({ sensors: SENSOR_CONFIG_SCHEMA })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    db.transaction((tx) => {
+      tx.delete(agentSensors).where(eq(agentSensors.agentId, id)).run();
+      for (const s of parsed.data.sensors) {
+        tx.insert(agentSensors)
+          .values({
+            id: newId("sns"),
+            agentId: id,
+            kind: s.kind,
+            enabled: s.enabled,
+            config: s.config,
+            createdAt: new Date().toISOString(),
+          })
+          .run();
+      }
+    });
+    return reply.send({ ok: true });
   });
 }

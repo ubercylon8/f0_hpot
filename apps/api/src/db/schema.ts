@@ -50,6 +50,23 @@ export const agents = sqliteTable("agents", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const agentSensors = sqliteTable(
+  "agent_sensors",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    config: text("config", { mode: "json" }).notNull().default("{}"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [index("agent_sensors_agent_idx").on(t.agentId)],
+);
+
 export const alertChannels = sqliteTable("alert_channels", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),

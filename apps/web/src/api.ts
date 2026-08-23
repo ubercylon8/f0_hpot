@@ -31,6 +31,24 @@ export interface Incident {
   seenAt: string;
 }
 
+export interface SensorRow {
+  id: string;
+  agentId?: string;
+  kind: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface AgentRow {
+  id: string;
+  hostname: string;
+  platform: string;
+  version: string;
+  status: string;
+  lastSeenAt: string | null;
+  sensors: SensorRow[];
+}
+
 export interface AlertChannel {
   id: string;
   kind: string;
@@ -63,6 +81,12 @@ export const api = {
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
   listChannels: () => request<AlertChannel[]>("/alert-channels"),
+  listAgents: () => request<AgentRow[]>("/agents"),
+  setAgentSensors: (id: string, sensors: { kind: string; enabled: boolean; config: object }[]) =>
+    request(`/agents/${id}/sensors`, {
+      method: "PUT",
+      body: JSON.stringify({ sensors }),
+    }),
   createChannel: (kind: string, config: object) =>
     request<{ id: string }>("/alert-channels", {
       method: "POST",

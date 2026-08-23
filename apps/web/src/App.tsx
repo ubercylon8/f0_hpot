@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Incident, type TokenRow, type AlertChannel } from "./api.js";
+import { api, type Incident, type TokenRow, type AlertChannel, type AgentRow } from "./api.js";
 
 const TOKEN_TYPES = [
   { id: "web_bug", label: "Web Bug", hint: "1x1 pixel URL" },
@@ -9,24 +9,27 @@ const TOKEN_TYPES = [
   { id: "sensitive_cmd", label: "Sensitive Command", hint: "fake cmd output page" },
 ] as const;
 
-type Tab = "dashboard" | "tokens" | "incidents" | "channels";
+type Tab = "dashboard" | "tokens" | "incidents" | "agents" | "channels";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [channels, setChannels] = useState<AlertChannel[]>([]);
+  const [agents, setAgents] = useState<AgentRow[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      const [t, i, c] = await Promise.all([
+      const [t, i, c, a] = await Promise.all([
         api.listTokens(),
         api.listIncidents(),
-        api.listChannels(),
+        api.listChannels().catch(() => [] as AlertChannel[]),
+        api.listAgents().catch(() => [] as AgentRow[]),
       ]);
       setTokens(t);
       setIncidents(i);
       setChannels(c);
+      setAgents(a);
     } catch (err) {
       console.error("failed to load console data:", err);
     }
@@ -50,6 +53,7 @@ export default function App() {
               ["dashboard", "Dashboard"],
               ["tokens", "Tokens"],
               ["incidents", `Incidents${unacked(incidents) ? ` (${unacked(incidents)})` : ""}`],
+              ["agents", `Agents (${agents.length})`],
               ["channels", "Alert Channels"],
             ] as [Tab, string][]
           ).map(([id, label]) => (
@@ -72,6 +76,7 @@ export default function App() {
         {tab === "tokens" && <TokensView tokens={tokens} onChange={refresh} />}
         {tab === "incidents" && <IncidentsView incidents={incidents} onChange={refresh} />}
         {tab === "channels" && <ChannelsView channels={channels} onChange={refresh} />}
+        {tab === "agents" && <AgentsView agents={agents} onChange={refresh} />}
       </main>
     </div>
   );
@@ -267,6 +272,173 @@ function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChang
         </div>
       ))}
     </section>
+  );
+}
+
+function AgentsView({ agents, onChange }: { agents: AgentRow[]; onChange: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+
+  return (
+    <section className="space-y-4">
+      {agents.length === 0 && (
+        <p className="text-neutral-500 text-sm">
+          No agents enrolled. Run the agent with{" "}
+          <code className="text-neutral-300">--server &lt;api-url&gt; --enroll &lt;token&gt;</code>.
+        </p>
+      )}
+      {agents.map((a) => {
+        const online =
+          a.status === "online" &&
+          a.lastSeenAt !== null &&
+          Date.now() - new Date(a.lastSeenAt).getTime() < 180_000;
+        return (
+          <div key={a.id} className="rounded-lg border border-neutral-800 bg-neutral-900 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium">{a.hostname}</span>{" "}
+                <span
+                  className={`ml-2 text-xs ${online ? "text-green-400" : "text-red-400"}`}
+                >
+                  {online ? "● online" : "● offline"}
+                </span>
+              </div>
+              <span className="text-xs text-neutral-400">
+                {a.platform} · v{a.version} · last seen{" "}
+                {a.lastSeenAt ? new Date(a.lastSeenAt).toLocaleString() : "never"}
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              {a.sensors.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 text-sm text-neutral-300">
+                  <span className={s.enabled ? "text-amber-400" : "text-neutral-600"}>
+                    {s.enabled ? "▶" : "■"}
+                  </span>
+                  <span className="font-mono">{s.kind}</span>
+                  <span className="font-mono text-xs text-neutral-500">
+                    {JSON.stringify(s.config)}
+                  </span>
+                </div>
+              ))}
+              {a.sensors.length === 0 && (
+                <p className="text-xs text-neutral-500">No sensors configured.</p>
+              )}
+            </div>
+
+            <button
+              onClick={() => setEditing(editing === a.id ? null : a.id)}
+              className="text-xs border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
+            >
+              {editing === a.id ? "close editor" : "edit sensors"}
+            </button>
+            {editing === a.id && (
+              <SensorEditor
+                agentId={a.id}
+                initial={a.sensors}
+                onDone={() => {
+                  setEditing(null);
+                  onChange();
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+const SENSOR_KINDS = ["ssh", "http_login"] as const;
+
+function SensorEditor({
+  agentId,
+  initial,
+  onDone,
+}: {
+  agentId: string;
+  initial: { kind: string; enabled: boolean; config: Record<string, unknown> }[];
+  onDone: () => void;
+}) {
+  const [rows, setRows] = useState(
+    initial.map((s) => ({ kind: s.kind, enabled: s.enabled, port: String(s.config["port"] ?? ""), token_id: String(s.config["token_id"] ?? "") })),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  function update(i: number, patch: Partial<(typeof rows)[number]>) {
+    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  }
+
+  async function save() {
+    setError(null);
+    try {
+      await api.setAgentSensors(
+        agentId,
+        rows.map((r) => ({
+          kind: r.kind,
+          enabled: r.enabled,
+          config: { port: Number(r.port) || undefined, token_id: r.token_id || undefined },
+        })),
+      );
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <div className="border border-neutral-800 rounded-md p-4 space-y-2 bg-neutral-950">
+      {rows.map((r, i) => (
+        <div key={i} className="flex flex-wrap gap-2 items-center">
+          <select
+            value={r.kind}
+            onChange={(e) => update(i, { kind: e.target.value })}
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+          >
+            {SENSOR_KINDS.map((k) => (
+              <option key={k}>{k}</option>
+            ))}
+          </select>
+          <input
+            placeholder="port"
+            value={r.port}
+            onChange={(e) => update(i, { port: e.target.value })}
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-24"
+          />
+          <input
+            placeholder="token id"
+            value={r.token_id}
+            onChange={(e) => update(i, { token_id: e.target.value })}
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-48"
+          />
+          <label className="text-xs flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={r.enabled}
+              onChange={(e) => update(i, { enabled: e.target.checked })}
+            />
+            enabled
+          </label>
+          <button onClick={() => setRows(rows.filter((_, j) => j !== i))} className="text-red-400 text-xs">
+            remove
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", token_id: "" }])}
+          className="text-xs border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
+        >
+          + add sensor
+        </button>
+        <button
+          onClick={() => void save()}
+          className="bg-amber-500 hover:bg-amber-400 text-black font-medium rounded px-3 py-1 text-xs"
+        >
+          save &amp; deploy
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
   );
 }
 

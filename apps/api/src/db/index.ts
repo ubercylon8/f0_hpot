@@ -47,6 +47,16 @@ export function migrate(db: Db): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS agent_sensors (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS agent_sensors_agent_idx ON agent_sensors (agent_id);
+
     CREATE TABLE IF NOT EXISTS alert_channels (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
