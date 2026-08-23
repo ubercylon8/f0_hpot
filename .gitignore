@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# databases
+*.db
+*.db-wal
+*.db-shm
+
+# logs
+*.log
+
+# os
+.DS_Store
+
+# agent build artifacts
+agent/bin/
+agent/f0-deception-agent
