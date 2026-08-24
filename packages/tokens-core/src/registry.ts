@@ -14,7 +14,7 @@ import {
   sqlInjectionToken,
 } from "./document-tokens.js";
 import { pdfDocToken, clonedWebsiteToken } from "./pdf-clone-tokens.js";
-import { awsKeysToken, azureConfigToken } from "./cloud-tokens.js";
+import { awsKeysToken, azureConfigToken, honeypotToken } from "./cloud-tokens.js";
 import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResult } from "./types.js";
 
 export type {
@@ -39,6 +39,7 @@ const definitions: TokenTypeDefinition[] = [
   clonedWebsiteToken,
   awsKeysToken,
   azureConfigToken,
+  honeypotToken,
 ];
 
 const registry = new Map<string, TokenTypeDefinition>(

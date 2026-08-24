@@ -7,6 +7,7 @@ const TOKEN_TYPES = [
   { id: "qr_code", label: "QR Code", hint: "scan-to-trigger" },
   { id: "fast_redirect", label: "Fast Redirect", hint: "requires target_url" },
   { id: "sensitive_cmd", label: "Sensitive Command", hint: "fake cmd output page" },
+  { id: "honeypot", label: "Honeypot Link", hint: "reference token for agent sensors" },
 ] as const;
 
 type Tab = "dashboard" | "tokens" | "incidents" | "agents" | "channels";
@@ -257,15 +258,29 @@ function incidentSummary(i: Incident): { label: string; detail: string; sourceIp
   if (i.event.kind === "agent") {
     const sensor = str("sensor") ?? "agent";
     const event = str("event");
-    let detail = sensor;
+    let label: string;
+    let extra = "";
     if (event === "ntlm_credentials" || event === "credssp_credentials") {
-      detail = `${sensor}: captured ${str("domain") ?? ""}\\${str("username") ?? "?"} (hashcat line in evidence)`;
-    } else if (str("username")) {
-      detail = `${sensor}: login attempt user="${str("username")}"`;
+      label = `${sensor}: CAPTURED credentials ${str("domain") ?? ""}\\${str("username") ?? "?"}`;
+      extra = str("hashcat") ?? "";
+    } else if (event === "credential_attempt" || str("password") !== undefined) {
+      const pw = str("password");
+      label = `${sensor}: credential attempt user="${str("user") ?? str("username") ?? "?"}"` +
+        (pw ? ` password="${pw}"` : "");
+      const cv = str("client_version");
+      if (cv) extra = `client: ${cv}`;
+    } else if (event === "command_execution" || d["command"] !== undefined) {
+      const cmd = d["command"];
+      label = `${sensor}: command executed by "${str("user") ?? "?"}": ` +
+        (Array.isArray(cmd) ? cmd.join(" ") : String(cmd ?? ""));
+    } else if (event === "bait_file_touched" || event === "watched_file_accessed") {
+      label = `${sensor}: ${str("label") ?? str("path") ?? event} accessed`;
     } else if (event) {
-      detail = `${sensor}: ${event}`;
+      label = `${sensor}: ${event}`;
+    } else {
+      label = sensor;
     }
-    return { label: detail, detail: str("hashcat") ?? "", sourceIp };
+    return { label, detail: extra, sourceIp };
   }
   if (i.event.kind === "dns" && i.event.dns) {
     return { label: `DNS ${i.event.dns.queryName} (${i.event.dns.queryType})`, detail: "", sourceIp };

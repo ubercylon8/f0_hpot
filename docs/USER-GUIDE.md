@@ -81,6 +81,16 @@ Generates believable credentials + instructions wiring YOUR cloud tenant's
 audit logs to this platform's ingest URL. Without cloud wiring they are inert
 decorations — do the one-time wiring step in the readme.
 
+### Honeypot link
+Reference token for agent-side sensors. Create one per honeypot deployment
+(e.g. memo "SSH honeypot on DC-adjacent host") and set the sensor's
+`token_id` to it in the Agents tab. Incidents then show the honeypot
+context instead of an unrelated token type.
+
+> One SSH session produces TWO incidents by design: a **credential attempt**
+> (password captured) and a **command execution** (what they ran). They are
+> separate evidence, labeled by their `event` field.
+
 ### Fast redirect
 302s visitors to any target while capturing them. Use for link-tracking in
 documents or shortened URLs.

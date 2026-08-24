@@ -163,3 +163,34 @@ function base32(buf: Buffer): string {
 
 
 // node:crypto randomUUID re-exported for clarity
+
+/**
+ * Honeypot placeholder token: the managed token a sensor references so
+ * agent-side detections are linked to something revocable/alertable.
+ * It never triggers from the gateway — only agent reports hit it.
+ */
+export const honeypotToken: TokenTypeDefinition = {
+  id: "honeypot",
+  label: "Honeypot Link",
+  description:
+    "Reference token for agent-side honeypot sensors. Create one per honeypot deployment and point the sensor's token_id at it.",
+  group: "agent",
+  configSchema: z.object({
+    sensor: z.string().optional(),
+    host: z.string().optional(),
+  }),
+  generate(ctx) {
+    const sensor = ctx.config["sensor"] ? String(ctx.config["sensor"]) : "any";
+    const host = ctx.config["host"] ? String(ctx.config["host"]) : "";
+    return [
+      {
+        kind: "url",
+        label: `Sensor reference (${sensor}${host ? ` on ${host}` : ""})`,
+        value: `token_id=${ctx.tokenId}`,
+      },
+    ];
+  },
+  matchTrigger(_event, _tokenId): MatchResult {
+    return { matched: false }; // gateway events never trigger honeypot links
+  },
+};

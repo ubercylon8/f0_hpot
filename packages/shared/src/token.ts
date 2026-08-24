@@ -20,6 +20,7 @@ export const tokenTypeSchema = z.enum([
   "fast_redirect",
   "aws_keys",
   "azure_config",
+  "honeypot",
 ]);
 export type TokenType = z.infer<typeof tokenTypeSchema>;
 

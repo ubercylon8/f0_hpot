@@ -23,6 +23,7 @@ func (SSHSensor) Start(cfg map[string]interface{}, report Reporter) error {
 	reporter := func(session glssh.Session) {
 		cmd := session.Command()
 		detail := map[string]interface{}{
+			"event":     "command_execution",
 			"user":      session.User(),
 			"command":   cmd,
 			"source_ip": session.RemoteAddr().String(),
@@ -48,6 +49,7 @@ func (SSHSensor) Start(cfg map[string]interface{}, report Reporter) error {
 		Version: banner,
 		PasswordHandler: func(ctx glssh.Context, password string) bool {
 			detail := map[string]interface{}{
+				"event":          "credential_attempt",
 				"user":           ctx.User(),
 				"password":       password,
 				"source_ip":      ctx.RemoteAddr().String(),

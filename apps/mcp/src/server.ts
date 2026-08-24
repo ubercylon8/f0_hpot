@@ -63,6 +63,7 @@ s.tool(
       "sql_injection",
       "aws_keys",
       "azure_config",
+      "honeypot",
       "sensitive_cmd",
       "fast_redirect",
     ]).describe("Token type"),
