@@ -25,6 +25,17 @@ const channelConfigSchemas: Record<string, z.ZodType> = {
     port: z.number().int().min(1).max(65535).optional(),
     app_name: z.string().optional(),
   }),
+  elasticsearch: z.object({
+    url: z.string().url(),
+    index: z.string().optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
+  }),
+  loki: z.object({
+    url: z.string().url(),
+    labels: z.record(z.string(), z.string()).optional(),
+    tenant_id: z.string().optional(),
+  }),
 };
 
 export function registerAlertRoutes(
@@ -39,7 +50,7 @@ export function registerAlertRoutes(
   app.post("/api/v1/alert-channels", async (request, reply) => {
     const parsed = z
       .object({
-        kind: z.enum(["webhook", "email", "syslog"]),
+        kind: z.enum(["webhook", "email", "syslog", "elasticsearch", "loki"]),
         config: z.record(z.string(), z.unknown()),
       })
       .safeParse(request.body);

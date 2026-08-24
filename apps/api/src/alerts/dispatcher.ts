@@ -5,11 +5,14 @@ import type { AlertPayload, AlertSender } from "./types.js";
 import { webhookSender } from "./webhook.js";
 import { emailSender } from "./email.js";
 import { syslogSender } from "./syslog.js";
+import { elasticsearchSender, lokiSender } from "./siem.js";
 
 const senders: Record<string, AlertSender> = {
   webhook: webhookSender,
   email: emailSender,
   syslog: syslogSender,
+  elasticsearch: elasticsearchSender,
+  loki: lokiSender,
 };
 
 const MAX_FAILURES = 5;

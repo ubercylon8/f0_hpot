@@ -451,7 +451,11 @@ function ChannelsView({ channels, onChange }: { channels: AlertChannel[]; onChan
   async function create() {
     setError(null);
     const config =
-      kind === "webhook" ? { url } : kind === "syslog" ? { host, port: 514 } : {};
+      kind === "webhook"
+        ? { url }
+        : kind === "syslog"
+          ? { host, port: 514 }
+          : { url }; // elasticsearch / loki take a url too
     try {
       await api.createChannel(kind, config);
       setUrl("");
@@ -474,19 +478,21 @@ function ChannelsView({ channels, onChange }: { channels: AlertChannel[]; onChan
           >
             <option value="webhook">Webhook</option>
             <option value="syslog">Syslog (UDP)</option>
+            <option value="elasticsearch">Elasticsearch</option>
+            <option value="loki">Grafana Loki</option>
           </select>
-          {kind === "webhook" ? (
-            <input
-              placeholder="https://hooks.example.com/f0"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm flex-1 min-w-64"
-            />
-          ) : (
+          {kind === "syslog" ? (
             <input
               placeholder="siem host"
               value={host}
               onChange={(e) => setHost(e.target.value)}
+              className="bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm flex-1 min-w-64"
+            />
+          ) : (
+            <input
+              placeholder="http(s):// endpoint url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
               className="bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm flex-1 min-w-64"
             />
           )}
