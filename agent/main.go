@@ -8,11 +8,13 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/f0rt1ka/f0-deception-agent/internal/api"
 	"github.com/f0rt1ka/f0-deception-agent/internal/config"
 	"github.com/f0rt1ka/f0-deception-agent/internal/sensors"
+	"github.com/f0rt1ka/f0-deception-agent/internal/update"
 )
 
 var version = "0.1.0-dev"
@@ -97,6 +99,7 @@ func main() {
 	sensors.Register(sensors.RDPSensor{})
 	sensors.Register(sensors.PlantedCredentialSensor{})
 	sensors.Register(sensors.FileWatchSensor{})
+	update.SetVersion(version)
 
 	poll := 60 * time.Second
 	var currentSpecs []api.SensorSpec
@@ -114,8 +117,25 @@ func main() {
 		default:
 			log.Printf("heartbeat failed, retrying in %s: %v", poll, err)
 		}
+		// Signed self-update check (no-op without embedded public key).
+		if updateURL := os.Getenv("F0_UPDATE_MANIFEST_URL"); updateURL != "" {
+			if m, err := update.FetchAndApply(updateURL, "f0-deception-agent-"+runtime.GOOS+"-"+runtime.GOARCH, os.Args[0]); err != nil {
+				log.Printf("self-update: %v", err)
+			} else if m != nil {
+				log.Printf("updated to %s; restarting", m.Version)
+				execSelf()
+			}
+		}
 		time.Sleep(poll)
 	}
+}
+
+func execSelf() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = syscall.Exec(exe, os.Args, os.Environ())
 }
 
 func toSensors(in []api.SensorSpec) []sensors.SensorSpec {

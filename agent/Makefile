@@ -30,6 +30,9 @@ release:
 			-o $(OUT)/$(BINARY)-$$os-$$arch$$suffix .; \
 	done
 	@ls -la $(OUT)
+	@if [ -n "$(RELEASE_PRIVKEY)" ]; then \
+		./sign_release.sh $(RELEASE_PRIVKEY) $(OUT)/f0-deception-agent-*; \
+	fi
 
 clean:
 	rm -rf $(OUT)
