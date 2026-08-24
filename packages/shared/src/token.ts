@@ -19,6 +19,7 @@ export const tokenTypeSchema = z.enum([
   "sql_injection",
   "fast_redirect",
   "aws_keys",
+  "azure_config",
 ]);
 export type TokenType = z.infer<typeof tokenTypeSchema>;
 

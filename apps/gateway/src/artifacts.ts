@@ -186,6 +186,12 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
       return false;
     }
 
+    if (action === "azure") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('{"accepted":true}');
+      return true;
+    }
+
     if (action === "aws") {
       // CloudTrail/EventBridge forwarder target: accept anything.
       res.writeHead(200, { "content-type": "application/json" });

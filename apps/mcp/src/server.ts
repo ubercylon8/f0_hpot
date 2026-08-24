@@ -62,6 +62,7 @@ s.tool(
       "windows_folder",
       "sql_injection",
       "aws_keys",
+      "azure_config",
       "sensitive_cmd",
       "fast_redirect",
     ]).describe("Token type"),
