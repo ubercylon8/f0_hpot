@@ -48,13 +48,32 @@ F0_API_BASE_URL=http://127.0.0.1:18443 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 npx 
 | `F0_TOKEN_DOMAINS` | api, gateway | `tokens.example.com` | comma-separated base domains |
 | `F0_GATEWAY_ORIGIN` | api, gateway | derived | public URL of gateway |
 | `F0_GATEWAY_IP` | gateway dns | `127.0.0.1` | A-record answer |
-| `F0_HTTP_PORT` / `F0_DNS_PORT` | gateway | `8080` / `5353` | listener ports |
-| `F0_API_BASE_URL` | gateway | `http://127.0.0.1:8443` | where incidents are forwarded |
+| `F0_HTTP_PORT` / `F0_DNS_PORT` / `F0_SMTP_PORT` | gateway | `8080`/`5353`/`2525` | listener ports |
+| `F0_MAIL_DOMAINS` | gateway smtp | = token domains | accepted email-token domains |
+| `F0_API_BASE_URL` | gateway, mcp | `http://127.0.0.1:8443` | console API location |
+| `F0_MAX_ALERTS_PER_MINUTE` | api | `1` | alert throttle per (token, source IP) |
+| `F0_ENROLLMENT_TOKEN` | api | unset (enroll disabled) | bootstrap token for agent enrollment |
+| `F0_AGENT_POLL_INTERVAL` | api | `60` | heartbeat interval served to agents |
+| `F0_MCP_HTTP` / `F0_MCP_PORT` | mcp | stdio / `8444` | HTTP transport for MCP |
+| `F0_API_TOKEN` | mcp | none | Bearer token sent to API |
+
+## Architecture notes
+
+- **Trigger authority is per-token-type at the API**: the gateway forwards candidate
+  events; `POST /api/v1/incidents` runs the token's own `matchTrigger` before recording.
+  Severity comes from that match, not the gateway.
+- Token ids may be in hostname labels OR the first path segment (apex-hosted
+  artifacts like documents embed `https://base.domain/<tokenId>/pixel.gif`).
+- Agent sensors reference managed token ids so honeypot hits stay linked to
+  revocable, alertable entities.
+- Sensor config is fleet-managed (`agent_sensors` table) and delivered via heartbeat.
 
 ## Roadmap snapshot
 
-- P0 ✅ scaffold/schema/shared types · P1 ✅(core) web_bug/dns/fast_redirect e2e
-- P2 alerts (email/webhook/syslog) + more token types
-- P3 document tokens (Office/PDF/cloned-site/SQLi/desktop.ini)
-- P4 Go agent fork + SSH/HTTP honeypots + local sensors
-- P5 MCP server · P6 SMB/RDP, Elastic channel, cloud tokens
+- P0-P2 ✅ scaffold · core tokens · alerts (webhook/email/syslog) + throttling
+- P3 ✅ word/excel/windows_folder/sql_injection (+ qr, email, sensitive_cmd)
+- P4 ✅ Go agent: enroll, fleet-managed sensors, SSH+HTTP honeypots,
+  planted_credential/file_watch local sensors, installers, 5-platform release
+- P5 ✅ MCP server (8 tools, stdio+HTTP)
+- P6 remaining: PDF/cloned-site tokens, SMB/RDP honeypots, Elastic/Loki channel,
+  cloud credential tokens (AWS/Azure), agent self-update + signing
