@@ -75,5 +75,6 @@ F0_API_BASE_URL=http://127.0.0.1:18443 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 npx 
 - P4 ✅ Go agent: enroll, fleet-managed sensors, SSH+HTTP honeypots,
   planted_credential/file_watch local sensors, installers, 5-platform release
 - P5 ✅ MCP server (8 tools, stdio+HTTP)
-- P6 remaining: PDF/cloned-site tokens, SMB/RDP honeypots, Elastic/Loki channel,
-  cloud credential tokens (AWS/Azure), agent self-update + signing
+- P6 ✅ PDF/cloned-site tokens, SMB (NTLM capture) + RDP (CredSSP/NLA)
+  honeypots, Elastic/Loki channels, AWS/Azure decoys, Ed25519 signed
+  self-updates, CI (build/test/semgrep/gitleaks)
