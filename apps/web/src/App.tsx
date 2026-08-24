@@ -348,7 +348,20 @@ function AgentsView({ agents, onChange }: { agents: AgentRow[]; onChange: () => 
   );
 }
 
-const SENSOR_KINDS = ["ssh", "http_login"] as const;
+const SENSOR_KINDS = [
+  { id: "ssh", fields: ["port", "token_id"] },
+  { id: "http_login", fields: ["port", "token_id"] },
+  { id: "smb", fields: ["port", "token_id"] },
+  { id: "rdp", fields: ["port", "token_id"] },
+  { id: "planted_credential", fields: ["path", "label", "token_id"] },
+  { id: "file_watch", fields: ["path", "label", "token_id"] },
+] as const;
+
+type SensorField = (typeof SENSOR_KINDS)[number]["fields"][number];
+
+function fieldsFor(kind: string): readonly SensorField[] {
+  return SENSOR_KINDS.find((k) => k.id === kind)?.fields ?? ["port", "token_id"];
+}
 
 function SensorEditor({
   agentId,
@@ -376,7 +389,12 @@ function SensorEditor({
         rows.map((r) => ({
           kind: r.kind,
           enabled: r.enabled,
-          config: { port: Number(r.port) || undefined, token_id: r.token_id || undefined },
+          config: {
+            port: r.port ? Number(r.port) : undefined,
+            path: r.path || undefined,
+            label: r.label || undefined,
+            token_id: r.token_id || undefined,
+          },
         })),
       );
       onDone();
@@ -392,24 +410,28 @@ function SensorEditor({
           <select
             value={r.kind}
             onChange={(e) => update(i, { kind: e.target.value })}
-            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-44"
           >
             {SENSOR_KINDS.map((k) => (
-              <option key={k}>{k}</option>
+              <option key={k.id}>{k.id}</option>
             ))}
           </select>
-          <input
-            placeholder="port"
-            value={r.port}
-            onChange={(e) => update(i, { port: e.target.value })}
-            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-24"
-          />
-          <input
-            placeholder="token id"
-            value={r.token_id}
-            onChange={(e) => update(i, { token_id: e.target.value })}
-            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-48"
-          />
+          {fieldsFor(r.kind).includes("port") && (
+            <input placeholder="port" value={r.port} onChange={(e) => update(i, { port: e.target.value })}
+              className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-20" />
+          )}
+          {fieldsFor(r.kind).includes("path") && (
+            <input placeholder="/absolute/path" value={r.path} onChange={(e) => update(i, { path: e.target.value })}
+              className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm flex-1 min-w-40" />
+          )}
+          {fieldsFor(r.kind).includes("label") && (
+            <input placeholder="label" value={r.label} onChange={(e) => update(i, { label: e.target.value })}
+              className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-32" />
+          )}
+          {fieldsFor(r.kind).includes("token_id") && (
+            <input placeholder="token id" value={r.token_id} onChange={(e) => update(i, { token_id: e.target.value })}
+              className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm w-36" />
+          )}
           <label className="text-xs flex items-center gap-1">
             <input
               type="checkbox"
@@ -425,7 +447,7 @@ function SensorEditor({
       ))}
       <div className="flex gap-2">
         <button
-          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", token_id: "" }])}
+          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", path: "", label: "", token_id: "" }])}
           className="text-xs border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
         >
           + add sensor
