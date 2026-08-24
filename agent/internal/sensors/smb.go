@@ -48,7 +48,7 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 		"source_ip": remoteIP(conn),
 		"bytes":     length,
 	}
-	if len(buf) < 4 || string(buf[0:4]) != "\xffSMB" {
+	if len(buf) < 4 || string(buf[0:4]) != "\xffSMB" && string(buf[0:4]) != "\xfeSMB" {
 		log.Printf("[smb] non-SMB payload from %s (%d bytes)", detail["source_ip"], length)
 		detail["event"] = "probe"
 		report(Trigger{
@@ -73,8 +73,9 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	totalLen := len(resp)
 	hdr := []byte{0x00, byte(totalLen >> 16), byte(totalLen >> 8), byte(totalLen)}
-	_, _ = conn.Write(append(hdr, resp...))
-	time.Sleep(500 * time.Millisecond)
+	if _, err := conn.Write(append(hdr, resp...)); err != nil {
+		return
+	}
 
 	report(Trigger{
 		Sensor:   "smb",
@@ -83,6 +84,127 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 		Detail:   detail,
 		SeenAt:   time.Now().UTC(),
 	})
+
+	smbSessionLoop(conn, tokenID, report)
+}
+
+// smbSessionLoop handles SESSION_SETUP exchanges after negotiation,
+// running one NTLM challenge round and capturing whatever credentials
+// the client volunteers.
+func smbSessionLoop(conn net.Conn, tokenID string, report Reporter) {
+	log.Printf("[smb-debug] loop entered")
+	for i := 0; i < 4; i++ { // bounded: at most a few round trips
+		buf, err := readNetBIOSMessage(conn)
+		if err != nil {
+			log.Printf("[smb-debug] read err: %v", err)
+			return
+		}
+		if len(buf) < 64 {
+			return
+		}
+		command := binary.LittleEndian.Uint16(buf[12:14])
+		sessionID := binary.LittleEndian.Uint64(buf[40:48])
+		log.Printf("[smb-debug] session setup cmd=%d len=%d", command, len(buf))
+		if command != 0x01 { // SMB2 SESSION_SETUP only
+			return
+		}
+		if len(buf) < 88 {
+			return
+		}
+		blobOff := int(binary.LittleEndian.Uint16(buf[78:80]))
+		blobLen := int(binary.LittleEndian.Uint16(buf[80:82]))
+		if blobOff <= 0 || blobOff+blobLen > len(buf) {
+			return
+		}
+		secBlob := buf[blobOff : blobOff+blobLen]
+
+		switch {
+		case IsNegotiate(secBlob):
+			challengeMsg, _, err := BuildChallenge("FORTIKA")
+			if err != nil {
+				return
+			}
+			reply := buildSMB2StatusReply(0xC0000016, sessionID|1, challengeMsg) // MORE_PROCESSING_REQUIRED
+			writeNetBIOS(conn, reply)
+
+		case IsAuthenticate(secBlob):
+			msg := findNTLMBlob(secBlob)
+			auth, err := ParseAuthenticate(msg)
+			if err != nil {
+				log.Printf("[smb] auth parse failed from %s: %v", remoteIP(conn), err)
+				return
+			}
+			line := HashcatLine(auth)
+			log.Printf("[smb] captured credentials user=%q domain=%q host=%q from %s",
+				auth.Username, auth.Domain, auth.Host, remoteIP(conn))
+			report(Trigger{
+				Sensor:   "smb",
+				TokenID:  tokenID,
+				Severity: "high",
+				Detail: map[string]interface{}{
+					"event":     "ntlm_credentials",
+					"source_ip": remoteIP(conn),
+					"username":  auth.Username,
+					"domain":    auth.Domain,
+					"host":      auth.Host,
+					"hashcat":   line,
+				},
+				SeenAt: time.Now().UTC(),
+			})
+			fail := buildSMB2StatusReply(0xC000006D, sessionID|1, nil) // LOGON_FAILURE
+			writeNetBIOS(conn, fail)
+			return
+		default:
+			return
+		}
+	}
+}
+
+// readNetBIOSMessage reads one NetBIOS-framed SMB message.
+func readNetBIOSMessage(conn net.Conn) ([]byte, error) {
+	nb := make([]byte, 4)
+	if _, err := io.ReadFull(conn, nb); err != nil {
+		return nil, err
+	}
+	length := int(nb[1])<<16 | int(nb[2])<<8 | int(nb[3])
+	if length <= 0 || length > 16*1024 {
+		return nil, fmt.Errorf("bad NetBIOS length %d", length)
+	}
+	buf := make([]byte, length)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func writeNetBIOS(conn net.Conn, msg []byte) error {
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	totalLen := len(msg)
+	hdr := []byte{0x00, byte(totalLen >> 16), byte(totalLen >> 8), byte(totalLen)}
+	_, err := conn.Write(append(hdr, msg...))
+	return err
+}
+
+// buildSMB2StatusReply constructs a bare SMB2 reply with a status and an
+// optional security blob (used for session setup flows).
+func buildSMB2StatusReply(status uint32, sessionID uint64, blob []byte) []byte {
+	const secOffset = 72
+	out := make([]byte, 64)
+	copy(out[0:4], "\xfeSMB")
+	binary.LittleEndian.PutUint16(out[4:6], 64)
+	binary.LittleEndian.PutUint32(out[8:12], status)
+	binary.LittleEndian.PutUint16(out[12:14], 0x01) // SESSION_SETUP
+
+	body := make([]byte, 8)
+	binary.LittleEndian.PutUint16(body[0:2], 9) // StructureSize
+	if blob != nil {
+		binary.LittleEndian.PutUint16(body[4:6], secOffset)
+		binary.LittleEndian.PutUint16(body[6:8], uint16(len(blob)))
+	}
+	out = append(out, body...)
+	binary.LittleEndian.PutUint64(out[40:48], sessionID)
+	out = append(out, blob...)
+	return out
 }
 
 // buildSMB2NegotiateResponse returns header(64) + fixed body(64) + SPNEGO/NTLM
