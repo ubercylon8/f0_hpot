@@ -82,6 +82,10 @@ export const api = {
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
   listChannels: () => request<AlertChannel[]>("/alert-channels"),
+  listReleases: () =>
+    request<{ files: { filename: string; size: number; url: string }[]; manifest: string | null }>(
+      "/agent-releases",
+    ),
   listAgents: () => request<AgentRow[]>("/agents"),
   setAgentSensors: (id: string, sensors: { kind: string; enabled: boolean; config: object }[]) =>
     request(`/agents/${id}/sensors`, {

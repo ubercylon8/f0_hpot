@@ -352,11 +352,65 @@ function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChang
   );
 }
 
+function ReleasesPanel() {
+  const [files, setFiles] = useState<{ filename: string; size: number; url: string }[]>([]);
+  const [manifest, setManifest] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .listReleases()
+      .then((r) => {
+        setFiles(r.files);
+        setManifest(r.manifest);
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-5 space-y-2">
+      <h2 className="font-medium">Agent downloads</h2>
+      {files.length === 0 ? (
+        <p className="text-xs text-neutral-500">
+          No release binaries found. Build with{" "}
+          <code className="text-neutral-400">cd agent && make release</code> and set{" "}
+          <code className="text-neutral-400">F0_AGENT_RELEASE_DIR</code> on the API.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {files.map((f) => (
+            <li key={f.filename} className="flex items-center justify-between text-sm">
+              <span className="font-mono text-xs">{f.filename}</span>
+              <span className="flex items-center gap-3 text-xs text-neutral-500">
+                {(f.size / 1e6).toFixed(1)} MB
+                <a
+                  href={f.url}
+                  download
+                  className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-0.5"
+                >
+                  download
+                </a>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {manifest && (
+        <p className="text-xs text-green-500">✓ signed release manifest present</p>
+      )}
+      <p className="text-xs text-neutral-500">
+        Install: <code className="text-neutral-400">./f0-deception-agent --server &lt;api-url&gt; --enroll &lt;token&gt; --install</code>
+      </p>
+    </div>
+  );
+}
+
 function AgentsView({ agents, onChange }: { agents: AgentRow[]; onChange: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
     <section className="space-y-4">
+      <ReleasesPanel />
+
       {agents.length === 0 && (
         <p className="text-neutral-500 text-sm">
           No agents enrolled. Run the agent with{" "}

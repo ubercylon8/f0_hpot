@@ -4,6 +4,7 @@ import { createDb, migrate } from "./db/index.js";
 import { registerTokenRoutes } from "./routes/tokens.js";
 import { registerAlertRoutes } from "./routes/alerts.js";
 import { registerAgentRoutes } from "./routes/agents.js";
+import { registerReleaseRoutes } from "./routes/releases.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
 
 export function buildServer(opts: { dbPath?: string } = {}) {
@@ -22,6 +23,7 @@ export function buildServer(opts: { dbPath?: string } = {}) {
   registerTokenRoutes(app, db, dispatcher);
   registerAlertRoutes(app, db, dispatcher);
   registerAgentRoutes(app, db);
+  registerReleaseRoutes(app);
 
   return { app, db };
 }
