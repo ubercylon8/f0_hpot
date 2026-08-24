@@ -5,6 +5,16 @@ client** (stricter than scripted clients) and confirm credential capture.
 
 ## Topology
 
+> **Note (current state):** the Windows VM is reached via an SSH port-forward
+> (`ssh win` → `localhost:22`), which must be up before testing. When it is,
+> establish the reverse tunnel for the RDP port:
+> `ssh -f -N -R 13389:127.0.0.1:13389 win`
+> then connect mstsc to `localhost:13389` **on the VM**. Without the tunnel
+> mstsc fails instantly with error `0x904` (connection dropped) — that means
+> networking, not the honeypot.
+
+
+
 ```
 Windows 11 VM (ssh win)                f0_deception agent host
 172.30.0.2                ──RDP──►     <agent-host>:13389
