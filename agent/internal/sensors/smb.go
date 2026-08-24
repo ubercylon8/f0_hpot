@@ -25,31 +25,18 @@ func (SMBSensor) Start(cfg map[string]interface{}, report Reporter) error {
 
 func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	// NetBIOS session service header: 4 bytes; type 0x00 = session message.
-	nb := make([]byte, 4)
-	if _, err := io.ReadFull(conn, nb); err != nil {
-		return
-	}
-	if nb[0] != 0x00 {
-		return
-	}
-	length := int(nb[1])<<16 | int(nb[2])<<8 | int(nb[3])
-	if length <= 0 || length > 16*1024 {
-		return
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(conn, buf); err != nil {
+	t := newSMBTransport(conn)
+	buf, err := t.readHead()
+	if err != nil {
 		return
 	}
 
 	detail := map[string]interface{}{
 		"source_ip": remoteIP(conn),
-		"bytes":     length,
+		"bytes":     len(buf),
 	}
 	if len(buf) < 4 || string(buf[0:4]) != "\xffSMB" && string(buf[0:4]) != "\xfeSMB" {
-		log.Printf("[smb] non-SMB payload from %s (%d bytes)", detail["source_ip"], length)
+		log.Printf("[smb] non-SMB payload from %s (%d bytes)", detail["source_ip"], len(buf))
 		detail["event"] = "probe"
 		report(Trigger{
 			Sensor:   "smb",
@@ -61,7 +48,8 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 		return
 	}
 
-	if len(buf) >= 36 && binary.LittleEndian.Uint16(buf[4:6]) == 0x24 {
+	isSMB2 := len(buf) >= 36 && binary.LittleEndian.Uint16(buf[4:6]) == 0x24
+	if isSMB2 {
 		detail["protocol"] = "SMB2"
 	} else {
 		detail["protocol"] = "SMB1"
@@ -69,11 +57,21 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 	detail["event"] = "negotiate"
 	log.Printf("[smb] %s negotiate from %s", detail["protocol"], detail["source_ip"])
 
+	if !isSMB2 {
+		// SMB1 path: negotiate + session loop with its own framing.
+		report(Trigger{
+			Sensor:   "smb",
+			TokenID:  tokenID,
+			Severity: "high",
+			Detail:   detail,
+			SeenAt:   time.Now().UTC(),
+		})
+		handleSMB1(t, buf, tokenID, report)
+		return
+	}
+
 	resp := buildSMB2NegotiateResponse()
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	totalLen := len(resp)
-	hdr := []byte{0x00, byte(totalLen >> 16), byte(totalLen >> 8), byte(totalLen)}
-	if _, err := conn.Write(append(hdr, resp...)); err != nil {
+	if err := t.writeMsg(resp); err != nil {
 		return
 	}
 
@@ -85,26 +83,20 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 		SeenAt:   time.Now().UTC(),
 	})
 
-	smbSessionLoop(conn, tokenID, report)
+	smbSessionLoop(t, tokenID, report)
 }
 
 // smbSessionLoop handles SESSION_SETUP exchanges after negotiation,
 // running one NTLM challenge round and capturing whatever credentials
 // the client volunteers.
-func smbSessionLoop(conn net.Conn, tokenID string, report Reporter) {
-	log.Printf("[smb-debug] loop entered")
+func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
 	for i := 0; i < 4; i++ { // bounded: at most a few round trips
-		buf, err := readNetBIOSMessage(conn)
-		if err != nil {
-			log.Printf("[smb-debug] read err: %v", err)
-			return
-		}
-		if len(buf) < 64 {
+		buf, err := t.readMsg()
+		if err != nil || len(buf) < 64 {
 			return
 		}
 		command := binary.LittleEndian.Uint16(buf[12:14])
 		sessionID := binary.LittleEndian.Uint64(buf[40:48])
-		log.Printf("[smb-debug] session setup cmd=%d len=%d", command, len(buf))
 		if command != 0x01 { // SMB2 SESSION_SETUP only
 			return
 		}
@@ -125,25 +117,27 @@ func smbSessionLoop(conn net.Conn, tokenID string, report Reporter) {
 				return
 			}
 			reply := buildSMB2StatusReply(0xC0000016, sessionID|1, challengeMsg) // MORE_PROCESSING_REQUIRED
-			writeNetBIOS(conn, reply)
+			if err := t.writeMsg(reply); err != nil {
+				return
+			}
 
 		case IsAuthenticate(secBlob):
 			msg := findNTLMBlob(secBlob)
 			auth, err := ParseAuthenticate(msg)
 			if err != nil {
-				log.Printf("[smb] auth parse failed from %s: %v", remoteIP(conn), err)
+				log.Printf("[smb] auth parse failed from %s: %v", remoteIP(t.conn), err)
 				return
 			}
 			line := HashcatLine(auth)
 			log.Printf("[smb] captured credentials user=%q domain=%q host=%q from %s",
-				auth.Username, auth.Domain, auth.Host, remoteIP(conn))
+				auth.Username, auth.Domain, auth.Host, remoteIP(t.conn))
 			report(Trigger{
 				Sensor:   "smb",
 				TokenID:  tokenID,
 				Severity: "high",
 				Detail: map[string]interface{}{
 					"event":     "ntlm_credentials",
-					"source_ip": remoteIP(conn),
+					"source_ip": remoteIP(t.conn),
 					"username":  auth.Username,
 					"domain":    auth.Domain,
 					"host":      auth.Host,
@@ -152,7 +146,7 @@ func smbSessionLoop(conn net.Conn, tokenID string, report Reporter) {
 				SeenAt: time.Now().UTC(),
 			})
 			fail := buildSMB2StatusReply(0xC000006D, sessionID|1, nil) // LOGON_FAILURE
-			writeNetBIOS(conn, fail)
+			_ = t.writeMsg(fail)
 			return
 		default:
 			return

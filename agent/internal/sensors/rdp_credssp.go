@@ -139,13 +139,14 @@ func readAllAvailable(conn net.Conn) ([]byte, error) {
 // TSRequest/SPNEGO negTokenResp structure.
 func writeTSRequestChallenge(w net.Conn, chal []byte) error {
 	respTok := append([]byte{0x04, byte(len(chal))}, chal...)
-	mech := []byte{0xa0, 0x03, 0x02, 0x01, 0x00} // negState: accept-completed
-	body := append(mech, append([]byte{0xa2, byte(len(respTok))}, respTok...)...)
+	inner := append([]byte{0xa0, 0x03, 0x0a, 0x01, 0x00}, // negState: accept-completed
+		append([]byte{0xa2, byte(len(respTok))}, respTok...)...)
+	negResp := append([]byte{0x30, byte(len(inner))}, inner...) // SEQUENCE wrapper
 	tsreq := append([]byte{
-		0x30, byte(len(body) + 7), // SEQUENCE
+		0x30, byte(len(negResp) + 7), // SEQUENCE
 		0xa0, 0x03, 0x02, 0x01, 0x05, // version = 5
-		0xa1, byte(len(body)), // negTokenResp
-	}, body...)
+		0xa1, byte(len(negResp)), // negTokenResp
+	}, negResp...)
 	_, err := w.Write(tsreq)
 	return err
 }

@@ -141,6 +141,34 @@ func utf16ToString(b []byte) string {
 	return sb.String()
 }
 
+// NTLM AV pair IDs (MS-NLMP 2.2.2.1)
+const (
+	avEOL         = 0x0000
+	avNbDomain    = 0x0001
+	avNbComputer  = 0x0003
+	avDnsDomain   = 0x0004
+	avDnsServer   = 0x0005
+	avDnsHostname = 0x0006
+)
+
+func avPair(id uint16, value string) []byte {
+	v := utf16Encode(value)
+	out := le16(nil, int(id))
+	out = le16(out, len(v))
+	return append(out, v...)
+}
+
+// buildTargetInfo constructs AV pairs the way real servers do (impacket
+// and other clients parse them eagerly; an empty list trips some parsers).
+func buildTargetInfo(domain string) []byte {
+	ti := avPair(avNbDomain, domain)
+	ti = append(ti, avPair(avNbComputer, domain)...)
+	ti = append(ti, avPair(avDnsDomain, domain+".local")...)
+	ti = append(ti, avPair(avDnsHostname, domain)...)
+	ti = append(ti, avPair(avEOL, "")...) // 4-byte EOL: type + zero length
+	return ti
+}
+
 // BuildChallenge constructs an NTLM CHALLENGE (type 2) message with a
 // fresh random server challenge and a decoy domain name.
 func BuildChallenge(targetName string) (msg []byte, challenge [8]byte, err error) {
@@ -148,9 +176,10 @@ func BuildChallenge(targetName string) (msg []byte, challenge [8]byte, err error
 		return nil, challenge, err
 	}
 	target := utf16Encode(targetName)
+	ti := buildTargetInfo(targetName)
 
 	flags := uint32(ntlmChallengeFlags)
-	m := make([]byte, 0, 64+len(target))
+	m := make([]byte, 0, 64+len(target)+len(ti))
 	m = append(m, ntlmMagic...)
 	m = le32(m, ntlmTypeChallenge)
 	// TargetName: len, alloc, offset
@@ -163,8 +192,7 @@ func BuildChallenge(targetName string) (msg []byte, challenge [8]byte, err error
 	m = append(m, challenge[:]...)
 	// Reserved (8 zero bytes)
 	m = append(m, make([]byte, 8)...)
-	// TargetInfo: empty AV-pair sequence terminated by 0x0000
-	ti := []byte{0, 0}
+	// TargetInfo: len, alloc, offset
 	m = le16(m, len(ti))
 	m = le16(m, len(ti))
 	m = le32(m, 56+len(target))
