@@ -181,13 +181,21 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
   const [type, setType] = useState<string>("web_bug");
   const [memo, setMemo] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
+  const [decoyPath, setDecoyPath] = useState("");
+  const [serverKind, setServerKind] = useState("nginx");
+  const [cmdName, setCmdName] = useState("ifconfig");
   const [error, setError] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   async function create() {
     setError(null);
     const config: Record<string, unknown> = {};
-    if (type === "fast_redirect") config["target_url"] = targetUrl;
+    if (type === "fast_redirect" || type === "cloned_website") config["target_url"] = targetUrl;
+    if (type === "sql_injection") {
+      config["path"] = decoyPath || "/search.php";
+      config["server_kind"] = serverKind;
+    }
+    if (type === "sensitive_cmd") config["cmd_name"] = cmdName;
     try {
       await api.createToken(type, memo || undefined, config);
       setMemo("");
