@@ -72,6 +72,44 @@ export function registerTokenRoutes(
         fileIdx += 1;
       }
 
+      // Cloned-site tokens: fetch the target page now, inject the beacon,
+      // store it for the gateway to serve at /<tokenId>/site.
+      if (def.id === "cloned_website") {
+        const targetUrl = String(configResult.data["target_url"] ?? "");
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 10_000);
+          const res = await fetch(targetUrl, {
+            signal: controller.signal,
+            redirect: "follow",
+            headers: { "user-agent": "Mozilla/5.0 (compatible; f0_deception)" },
+          });
+          clearTimeout(timer);
+          if (!res.ok) throw new Error(`target responded ${res.status}`);
+          let html = await res.text();
+          const beacon =
+            `<img src="${gatewayOriginFor(id)}/${id}/pixel.gif" width="1" height="1" alt="" style="display:none">`;
+          html = html.includes("</body>")
+            ? html.replace(/<\/body>/i, `${beacon}</body>`)
+            : html + beacon;
+          db.insert(tokenFiles)
+            .values({
+              id: newId("file"),
+              tokenId: id,
+              idx: 0,
+              filename: "cloned_page.html",
+              contentType: "text/html",
+              data: Buffer.from(html).toString("base64"),
+              createdAt,
+            })
+            .run();
+        } catch (err) {
+          app.log.warn(
+            `clone fetch failed for ${targetUrl}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+
       return reply.code(201).send({
         id,
         type: def.id,
@@ -197,6 +235,27 @@ export function registerTokenRoutes(
     return { type: row.type, config: row.config };
   });
 
+  // Internal: gateway serves cloned pages from here.
+  app.get("/api/v1/tokens/:id/internal-page", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const token = db
+      .select({ type: tokens.type, status: tokens.status })
+      .from(tokens)
+      .where(eq(tokens.id, id))
+      .get();
+    if (!token || token.status !== "active" || token.type !== "cloned_website") {
+      return reply.notFound();
+    }
+    const file = db
+      .select()
+      .from(tokenFiles)
+      .where(and(eq(tokenFiles.tokenId, id), eq(tokenFiles.idx, 0)))
+      .get();
+    if (!file) return reply.notFound();
+    reply.header("content-type", file.contentType);
+    return reply.send(Buffer.from(file.data, "base64"));
+  });
+
   app.get("/api/v1/tokens/:id/incidents", async (request, reply) => {    const { id } = request.params as { id: string };
     const rows = db
       .select()
@@ -265,6 +324,11 @@ export function registerTokenRoutes(
 
       return reply.code(201).send({ id: incidentId });
   });
+}
+
+function gatewayOriginFor(_tokenId: string): string {
+  const baseDomain = process.env.F0_TOKEN_DOMAINS?.split(",")[0]?.trim() ?? "tokens.example.com";
+  return process.env.F0_GATEWAY_ORIGIN ?? `https://${baseDomain}`;
 }
 
 function generateContextFor(tokenId: string, config: Record<string, unknown>) {

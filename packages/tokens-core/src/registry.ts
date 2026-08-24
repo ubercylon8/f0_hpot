@@ -13,6 +13,7 @@ import {
   windowsFolderToken,
   sqlInjectionToken,
 } from "./document-tokens.js";
+import { pdfDocToken, clonedWebsiteToken } from "./pdf-clone-tokens.js";
 import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResult } from "./types.js";
 
 export type {
@@ -33,6 +34,8 @@ const definitions: TokenTypeDefinition[] = [
   excelDocToken,
   windowsFolderToken,
   sqlInjectionToken,
+  pdfDocToken,
+  clonedWebsiteToken,
 ];
 
 const registry = new Map<string, TokenTypeDefinition>(

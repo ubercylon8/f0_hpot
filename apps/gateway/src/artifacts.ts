@@ -52,12 +52,20 @@ svc_backup:$6$rounds=...:19724:0:99999:7:::
 `,
 };
 
+interface CachedPage {
+  body: Buffer;
+  contentType: string;
+  expiresAt: number;
+}
+
 /**
  * Serves token artifacts for matched requests. Mirrors the trigger rules in
- * tokens-core: `/tok/pixel.gif`, `/tok/r` (redirect), `/tok/qr`, `/tok/cmd/:name`.
+ * tokens-core: `/tok/pixel.gif`, `/tok/r` (redirect), `/tok/qr`, `/tok/cmd/:name`,
+ * `/tok/sqli`, `/tok/site` (cloned page).
  */
 export function artifactResponder(opts: ArtifactResponderOptions) {
   const configCache = new Map<string, CachedConfig>();
+  const pageCache = new Map<string, CachedPage>();
 
   async function lookupToken(
     tokenId: string,
@@ -140,6 +148,42 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
       });
       res.end(body);
       return true;
+    }
+
+    if (action === "site") {
+      // Cloned page served from API storage; beacon inside triggers the hit.
+      const cached = pageCache.get(tokenId);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.writeHead(200, {
+          "content-type": cached.contentType,
+          "cache-control": "no-store",
+        });
+        res.end(cached.body);
+        return true;
+      }
+      try {
+        const pres = await fetch(
+          `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-page`,
+          { signal: AbortSignal.timeout(5000) },
+        );
+        if (pres.ok) {
+          const body = Buffer.from(await pres.arrayBuffer());
+          pageCache.set(tokenId, {
+            body,
+            contentType: pres.headers.get("content-type") ?? "text/html",
+            expiresAt: Date.now() + CONFIG_TTL_MS,
+          });
+          res.writeHead(200, {
+            "content-type": pageCache.get(tokenId)!.contentType,
+            "cache-control": "no-store",
+          });
+          res.end(body);
+          return true;
+        }
+      } catch {
+        /* fall through to 404 */
+      }
+      return false;
     }
 
     if (action === "sqli") {
