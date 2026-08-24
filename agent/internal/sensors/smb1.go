@@ -336,7 +336,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 			return
 
 		default:
-			log.Printf("[smb1-debug] unknown blob type")
+
 			return
 		}
 	}
