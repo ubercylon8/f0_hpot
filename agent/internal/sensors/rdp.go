@@ -56,11 +56,12 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 		"event":     "connection_request",
 		"source_ip": remoteIP(conn),
 	}
-	// Requested protocols at fixed offset in CRPDU: negReq fields.
-	if len(x224) >= 12 && x224[11] == 0x01 { // TYPE_RDP_NEG_REQ follows cookie
-		proto := x224[15] // requestedProtocols (low byte) when present
-		if len(x224) > 15 {
-			switch proto & 0x03 {
+	// Requested-protocols NEG_REQ: scan for the [0x01,0x00,0x08,proto,4×rsvd]
+	// sequence anywhere in the payload (position varies when a cookie or
+	// routing token precedes it).
+	for i := 0; i+8 <= len(x224); i++ {
+		if x224[i] == 0x01 && x224[i+1] == 0x00 && x224[i+2] == 0x08 {
+			switch x224[i+3] & 0x03 {
 			case 0x01:
 				detail["requested_security"] = "tls"
 			case 0x02:
@@ -68,18 +69,16 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 			case 0x03:
 				detail["requested_security"] = "tls+credssp"
 			}
+			break
 		}
 	}
 	// Cookie/routing token often contains the *username*: "Cookie: mstshash=USER"
-	for i := 0; i+8 <= len(x224); i++ {
-		if string(x224[i:i+6]) == "mstsha" {
-			end := i + 100
-			if end > len(x224) {
-				end = len(x224)
-			}
-			detail["cookie_hint"] = string(x224[i:end])
-			break
+	if idx := indexOf(x224, []byte("mstsha")); idx >= 0 {
+		end := idx + 64
+		if end > len(x224) {
+			end = len(x224)
 		}
+		detail["cookie_hint"] = string(x224[idx:end])
 	}
 
 	log.Printf("[rdp] conn request from %s (%v)", detail["source_ip"], detail["requested_security"])
@@ -89,6 +88,24 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, _ = conn.Write(ccf)
 	time.Sleep(200 * time.Millisecond)
+
+	report(Trigger{
+		Sensor:   "rdp",
+		TokenID:  tokenID,
+		Severity: "medium",
+		Detail:   detail,
+		SeenAt:   time.Now().UTC(),
+	})
+
+	// If the client requested NLA/CredSSP, upgrade to TLS and try to
+	// capture credentials through the NTLM exchange.
+	if proto, _ := detail["requested_security"].(string); proto == "credssp(nla)" || proto == "tls+credssp" {
+		tlsConn := upgradeRDPToTLS(conn)
+		if tlsConn != nil {
+			handleRDPCredSSP(tlsConn, tokenID, report)
+			return
+		}
+	}
 
 	report(Trigger{
 		Sensor:   "rdp",
