@@ -1,0 +1,88 @@
+# f0_deception Semgrep ruleset
+# Registry rules cover common vulns; custom rules encode project invariants.
+# CI runs `semgrep ci --config .semgrep.yml` — findings block the build.
+
+rules:
+  # --- Gateway hardening invariants (attacker-facing code) ---
+
+  - id: gateway-no-exec
+    message: The gateway parses attacker input by design — os/exec is forbidden there.
+    severity: ERROR
+    languages: [go]
+    paths:
+      include:
+        - "*/apps/gateway/**"
+    patterns:
+      - pattern: exec.Command(...)
+
+  - id: gateway-no-fs-from-request
+    message: Never map request-derived paths to the filesystem in the gateway.
+    severity: ERROR
+    languages: [go]
+    paths:
+      include:
+        - "*/apps/gateway/**"
+    patterns:
+      - pattern-either:
+          - pattern: os.ReadFile($REQPATH)
+          - pattern: os.Open($REQPATH)
+          - pattern: os.Create($REQPATH)
+    metavariable-pattern:
+      metavariable: $REQPATH
+      pattern-either:
+        - pattern: $REQ.URL
+        - pattern: $REQ.RequestURI
+
+  - id: sensors-no-exec-in-handler
+    message: Sensor handlers must not shell out — parse protocols in-process.
+    severity: WARNING
+    languages: [go]
+    paths:
+      include:
+        - "*/agent/internal/sensors/**"
+    patterns:
+      - pattern: exec.Command(...)
+
+  # --- Credential hygiene ---
+
+  - id: no-hardcoded-secrets
+    message: Possible hardcoded credential — load from env/config instead.
+    severity: WARNING
+    languages: [go, typescript, javascript]
+    patterns:
+      - pattern-either:
+          - pattern: $X = "password..."
+          - pattern: $X = "secret..."
+          - pattern: $X = "api_key..."
+          - pattern: $X = "apikey..."
+          - pattern: $X = "AKIA..."
+    metavariable-regex:
+      metavariable: $X
+      regex: (?i)^(password|passwd|secret|token|api_?key|apikey)$
+
+  - id: no-plaintext-http-urls-in-api
+    message: API-to-API calls should use https in production configs.
+    severity: INFO
+    languages: [typescript]
+    paths:
+      include:
+        - "*/apps/api/**"
+    patterns:
+      - pattern: $URL
+    metavariable-regex:
+      metavariable: $URL
+      regex: ^http://(?!127\.0\.0\.1|localhost)
+
+  # --- SQL safety (drizzle parameterizes; catch raw string concat) ---
+
+  - id: no-string-sql-concat
+    message: Use parameterized queries (drizzle) — never concatenate SQL.
+    severity: ERROR
+    languages: [typescript]
+    paths:
+      include:
+        - "*/apps/api/src/**"
+    patterns:
+      - pattern-either:
+          - pattern: $DB.run($Q + $X)
+          - pattern: $DB.exec($Q + $X)

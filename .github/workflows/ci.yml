@@ -83,7 +83,8 @@ jobs:
 
       - name: Semgrep
         uses: semgrep/semgrep-action@v1
-        continue-on-error: true # advisory until ruleset is tuned
+        with:
+          config: .semgrep.yml
 
       - name: Gitleaks (secret detection)
         uses: gitleaks/gitleaks-action@v2
