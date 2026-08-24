@@ -142,6 +142,21 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
       return true;
     }
 
+    if (action === "sqli") {
+      // Decoy "vulnerable" search page so scanners keep probing.
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "x-robots-tag": "noindex",
+      });
+      res.end(
+        `<html><body><h1>Search</h1>` +
+          `<form><input name="q" placeholder="Search..."><button>Go</button></form>` +
+          `<p>No results.</p></body></html>`,
+      );
+      return true;
+    }
+
     void tokenId;
     return false;
   };

@@ -31,27 +31,33 @@ async function forwardIncident(body: unknown): Promise<void> {
 }
 
 function onEvent(event: Parameters<typeof matchEventToType>[0]): void {
-  // The token id can sit at any label depth under the base domain. Labels
-  // like "sub" may spuriously satisfy trigger rules, so forward every
-  // matching candidate; the API drops ids that aren't live tokens.
-  const candidates =
-    event.kind === "dns"
-      ? extractTokenHints(event.dns?.queryName ?? "", baseDomains)
-      : event.kind === "http"
-        ? extractHostHints(event.http?.host ?? "", baseDomains)
-        : event.kind === "smtp"
-          ? [event.smtp?.to.split("@")[0] ?? ""]
-          : [];
-  const seen = new Set<string>();
+  // The token id can sit at any label depth under the base domain, or in
+  // the first path segment for apex-hosted artifacts (docs embed
+  // https://base.domain/<tokenId>/pixel.gif). Forward every plausible
+  // candidate; the API confirms against each token's actual type rules.
+  const candidates = new Set<string>();
+  if (event.kind === "dns") {
+    for (const c of extractTokenHints(event.dns?.queryName ?? "", baseDomains)) candidates.add(c);
+  } else if (event.kind === "http" && event.http) {
+    for (const c of extractHostHints(event.http.host, baseDomains)) candidates.add(c);
+    // Apex-hosted artifact: /<tokenId>/...
+    const firstSegment = event.http.path.split("?")[0]!.split("/").filter(Boolean)[0];
+    if (firstSegment && isOnBaseDomain(event.http.host)) candidates.add(firstSegment);
+  } else if (event.kind === "smtp") {
+    candidates.add(event.smtp?.to.split("@")[0] ?? "");
+  }
+  candidates.delete("");
   for (const tokenId of candidates) {
-    if (!tokenId || seen.has(tokenId)) continue;
-    seen.add(tokenId);
     const def = matchEventToType(event, tokenId);
     if (!def) continue;
     const match = def.matchTrigger(event, tokenId);
     if (!match.matched) continue;
     void forwardIncident({ tokenId, severity: match.severity, event });
   }
+}
+
+function isOnBaseDomain(host: string): boolean {
+  return baseDomains.includes(host);
 }
 
 const httpPort = Number(process.env.F0_HTTP_PORT ?? 8080);

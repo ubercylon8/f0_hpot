@@ -1,10 +1,19 @@
 import type { ZodType } from "zod";
 import type { TriggerEvent } from "@f0/deception-shared";
 
+export interface TokenFileSpec {
+  filename: string;
+  contentType: string;
+  /** Base64-encoded file contents (kept transport-friendly). */
+  bodyBase64: string;
+}
+
 export interface TokenArtifactSpec {
   kind: "url" | "hostname" | "file_download";
   label: string;
   value: string;
+  /** Present for file_download artifacts created at token-generation time. */
+  file?: TokenFileSpec;
 }
 
 export interface GenerateContext {

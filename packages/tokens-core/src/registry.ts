@@ -7,6 +7,12 @@ import {
   emailToken,
   sensitiveCmdToken,
 } from "./network-tokens.js";
+import {
+  wordDocToken,
+  excelDocToken,
+  windowsFolderToken,
+  sqlInjectionToken,
+} from "./document-tokens.js";
 import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResult } from "./types.js";
 
 export type {
@@ -23,6 +29,10 @@ const definitions: TokenTypeDefinition[] = [
   qrCodeToken,
   emailToken,
   sensitiveCmdToken,
+  wordDocToken,
+  excelDocToken,
+  windowsFolderToken,
+  sqlInjectionToken,
 ];
 
 const registry = new Map<string, TokenTypeDefinition>(

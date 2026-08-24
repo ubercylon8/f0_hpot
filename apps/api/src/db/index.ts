@@ -36,6 +36,17 @@ export function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS incidents_token_idx ON incidents (token_id);
     CREATE INDEX IF NOT EXISTS incidents_seen_idx ON incidents (seen_at);
 
+    CREATE TABLE IF NOT EXISTS token_files (
+      id TEXT PRIMARY KEY,
+      token_id TEXT NOT NULL REFERENCES tokens(id) ON DELETE CASCADE,
+      idx INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      data BLOB NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS token_files_token_idx ON token_files (token_id);
+
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       agent_key_hash TEXT NOT NULL,

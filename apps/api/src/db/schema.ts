@@ -67,6 +67,25 @@ export const agentSensors = sqliteTable(
   (t) => [index("agent_sensors_agent_idx").on(t.agentId)],
 );
 
+export const tokenFiles = sqliteTable(
+  "token_files",
+  {
+    id: text("id").primaryKey(),
+    tokenId: text("token_id")
+      .notNull()
+      .references(() => tokens.id, { onDelete: "cascade" }),
+    idx: integer("idx").notNull(),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    // Base64-encoded contents (SQLite blob mode isn't exposed by drizzle).
+    data: text("data").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [index("token_files_token_idx").on(t.tokenId)],
+);
+
 export const alertChannels = sqliteTable("alert_channels", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),

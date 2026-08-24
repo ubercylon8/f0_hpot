@@ -7,13 +7,18 @@ function defaultHostname(ctx: GenerateContext): string {
 }
 
 /**
- * A trigger matches a token when the token id appears in the event
- * (as a hostname/query-name label, or a URL path segment).
+ * A trigger matches a token when the token id appears in the event:
+ * as a hostname/query-name label, or as the first URL path segment
+ * (artifacts hosted on the base domain itself).
  */
 export function eventMentionsToken(event: TriggerEvent, tokenId: string): boolean {
   if (event.tokenHint === tokenId) return true;
   if (event.dns?.queryName.split(".").includes(tokenId)) return true;
-  if (event.http?.host.split(".").includes(tokenId)) return true;
+  const http = event.kind === "http" ? event.http : undefined;
+  if (http) {
+    if (http.host.split(".").includes(tokenId)) return true;
+    if (http.path.split("?")[0]!.split("/").includes(tokenId)) return true;
+  }
   return false;
 }
 

@@ -1,4 +1,4 @@
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -8,8 +8,8 @@ import {
 } from "@f0/deception-shared";
 import { getTokenType } from "@f0/deception-tokens-core";
 import type { Db } from "../db/index.js";
-import { tokens, incidents } from "../db/schema.js";
-import { newTokenId } from "../ids.js";
+import { tokens, incidents, tokenFiles } from "../db/schema.js";
+import { newId, newTokenId } from "../ids.js";
 import type { AlertDispatcher } from "../alerts/dispatcher.js";
 import type { TriggerEvent } from "@f0/deception-shared";
 
@@ -53,6 +53,24 @@ export function registerTokenRoutes(
 
       const ctx = generateContextFor(id, configResult.data);
       const artifacts = def.generate(ctx);
+
+      // Persist generated files for download endpoints.
+      let fileIdx = 0;
+      for (const artifact of artifacts) {
+        if (!artifact.file) continue;
+        db.insert(tokenFiles)
+          .values({
+            id: newId("file"),
+            tokenId: id,
+            idx: fileIdx,
+            filename: artifact.file.filename,
+            contentType: artifact.file.contentType,
+            data: artifact.file.bodyBase64,
+            createdAt,
+          })
+          .run();
+        fileIdx += 1;
+      }
 
       return reply.code(201).send({
         id,
@@ -117,6 +135,19 @@ export function registerTokenRoutes(
       .run();
     if (result.changes === 0) return reply.notFound("token not found");
     return reply.send({ ok: true });
+  });
+
+  app.get("/api/v1/tokens/:id/files/:idx", async (request, reply) => {
+    const { id, idx } = request.params as { id: string; idx: string };
+    const row = db
+      .select()
+      .from(tokenFiles)
+      .where(and(eq(tokenFiles.tokenId, id), eq(tokenFiles.idx, Number(idx))))
+      .get();
+    if (!row) return reply.notFound("artifact not found");
+    reply.header("content-type", row.contentType);
+    reply.header("content-disposition", `attachment; filename="${row.filename}"`);
+    return reply.send(Buffer.from(row.data, "base64"));
   });
 
   // Internal: gateway artifact rendering needs the token type + config.
@@ -197,6 +228,18 @@ export function registerTokenRoutes(
       if (!token || token.status !== "active") {
         return reply.notFound("no active token for this incident");
       }
+
+      // The gateway forwards candidate events; the token's own type rules
+      // are authoritative for whether this event is really a hit.
+      const def = getTokenType(token.type as Parameters<typeof getTokenType>[0]);
+      const match = def?.matchTrigger(
+        parsed.data.event as never,
+        token.id,
+      );
+      if (!def || !match?.matched) {
+        return reply.notFound("event does not match this token's triggers");
+      }
+
       const incidentId = `inc_${Date.now().toString(36)}${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -204,7 +247,7 @@ export function registerTokenRoutes(
         .values({
           id: incidentId,
           tokenId: token.id,
-          severity: parsed.data.severity,
+          severity: match.severity,
           event: parsed.data.event,
           seenAt: new Date().toISOString(),
         })
@@ -214,7 +257,7 @@ export function registerTokenRoutes(
       void dispatcher.dispatch({
         tokenId: token.id,
         tokenType: token.type,
-        severity: parsed.data.severity,
+        severity: match.severity,
         incidentId,
         seenAt: new Date().toISOString(),
         event: parsed.data.event as TriggerEvent,
