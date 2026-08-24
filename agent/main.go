@@ -78,13 +78,15 @@ func main() {
 	report := func(t sensors.Trigger) {
 		detail := t.Detail
 		detail["sensor"] = t.Sensor
+		sourceIP, _ := detail["source_ip"].(string)
 		err := client.ReportIncident(api.Incident{
 			TokenID:  t.TokenID,
 			Severity: t.Severity,
 			Event: map[string]interface{}{
-				"kind":      "http", // v1 detail channel; dedicated agent kind lands later
+				"kind":      "agent",
 				"tokenHint": t.TokenID,
 				"timestamp": t.SeenAt.Format(time.RFC3339),
+				"sourceIp":  sourceIP,
 				"detail":    detail,
 			},
 		})

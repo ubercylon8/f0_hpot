@@ -249,51 +249,90 @@ const SEVERITY_COLOR = {
   low: "text-neutral-400",
 } as const;
 
+function incidentSummary(i: Incident): { label: string; detail: string; sourceIp: string } {
+  const d = (i.event.detail ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string) : undefined);
+  const sourceIp = i.event.sourceIp ?? str("source_ip") ?? "unknown";
+
+  if (i.event.kind === "agent") {
+    const sensor = str("sensor") ?? "agent";
+    const event = str("event");
+    let detail = sensor;
+    if (event === "ntlm_credentials" || event === "credssp_credentials") {
+      detail = `${sensor}: captured ${str("domain") ?? ""}\\${str("username") ?? "?"} (hashcat line in evidence)`;
+    } else if (str("username")) {
+      detail = `${sensor}: login attempt user="${str("username")}"`;
+    } else if (event) {
+      detail = `${sensor}: ${event}`;
+    }
+    return { label: detail, detail: str("hashcat") ?? "", sourceIp };
+  }
+  if (i.event.kind === "dns" && i.event.dns) {
+    return { label: `DNS ${i.event.dns.queryName} (${i.event.dns.queryType})`, detail: "", sourceIp };
+  }
+  if (i.event.http) {
+    const ua = i.event.http.userAgent ? ` · ${i.event.http.userAgent}` : "";
+    return {
+      label: `${i.event.http.method} ${i.event.http.host}${i.event.http.path}`,
+      detail: ua,
+      sourceIp,
+    };
+  }
+  return { label: i.event.kind, detail: "", sourceIp };
+}
+
 function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChange: () => void }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <section className="space-y-2">
       {incidents.length === 0 && (
         <p className="text-neutral-500 text-sm">No incidents recorded yet.</p>
       )}
-      {incidents.map((i) => (
-        <div
-          key={i.id}
-          className={`rounded-lg border p-4 flex items-center justify-between gap-4 ${
-            i.acknowledged
-              ? "border-neutral-900 bg-neutral-950 opacity-60"
-              : "border-neutral-800 bg-neutral-900"
-          }`}
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <span className={`font-mono text-xs uppercase ${SEVERITY_COLOR[i.severity]}`}>
-                {i.severity}
-              </span>
-              <span className="text-sm font-medium">{i.tokenType ?? "token"}</span>
-              <span className="font-mono text-xs text-neutral-500">{i.tokenId}</span>
+      {incidents.map((i) => {
+        const { label, detail, sourceIp } = incidentSummary(i);
+        const isOpen = expanded === i.id;
+        return (
+          <div
+            key={i.id}
+            className={`rounded-lg border p-4 flex items-center justify-between gap-4 ${
+              i.acknowledged
+                ? "border-neutral-900 bg-neutral-950 opacity-60"
+                : "border-neutral-800 bg-neutral-900"
+            }`}
+          >
+            <div className="min-w-0 cursor-pointer" onClick={() => setExpanded(isOpen ? null : i.id)}>
+              <div className="flex items-center gap-3">
+                <span className={`font-mono text-xs uppercase ${SEVERITY_COLOR[i.severity]}`}>
+                  {i.severity}
+                </span>
+                <span className="text-sm font-medium">{i.tokenType ?? "token"}</span>
+                <span className="font-mono text-xs text-neutral-500">{i.tokenId}</span>
+              </div>
+              <div className="mt-1 text-xs text-neutral-300 truncate">{label}</div>
+              {detail && (
+                <div className="mt-0.5 text-xs text-neutral-500 truncate">{detail}</div>
+              )}
+              {isOpen && (
+                <pre className="mt-2 text-xs bg-neutral-950 border border-neutral-800 rounded p-3 overflow-x-auto text-neutral-400">
+{JSON.stringify(i.event, null, 2)}
+                </pre>
+              )}
             </div>
-            <div className="mt-1 text-xs text-neutral-400 truncate">
-              {i.event.kind === "dns" && i.event.dns
-                ? `DNS ${i.event.dns.queryName} (${i.event.dns.queryType})`
-                : i.event.http
-                  ? `${i.event.http.method} ${i.event.http.host}${i.event.http.path}`
-                  : i.event.kind}
+            <div className="flex items-center gap-4 shrink-0 text-xs text-neutral-400">
+              <span title={sourceIp}>{sourceIp}</span>
+              <span>{new Date(i.seenAt).toLocaleString()}</span>
+              {!i.acknowledged && (
+                <button
+                  onClick={() => void api.ackIncident(i.id).then(onChange)}
+                  className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
+                >
+                  ack
+                </button>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-4 shrink-0 text-xs text-neutral-400">
-            <span title={i.event.sourceIp}>{i.event.sourceIp}</span>
-            <span>{new Date(i.seenAt).toLocaleString()}</span>
-            {!i.acknowledged && (
-              <button
-                onClick={() => void api.ackIncident(i.id).then(onChange)}
-                className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
-              >
-                ack
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </section>
   );
 }

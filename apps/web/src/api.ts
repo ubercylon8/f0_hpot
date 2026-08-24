@@ -24,9 +24,10 @@ export interface Incident {
   acknowledged: boolean;
   event: {
     kind: string;
-    sourceIp: string;
+    sourceIp?: string;
     http?: { method: string; host: string; path: string; userAgent?: string };
     dns?: { queryName: string; queryType: string };
+    detail?: Record<string, unknown>;
   };
   seenAt: string;
 }
