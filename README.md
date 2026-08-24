@@ -40,6 +40,11 @@ curl -s -X POST localhost:18443/api/v1/tokens \
 Production deployment expects a public VPS with ports 80/443/53 and a wildcard
 DNS record (`*.tokens.yourdomain.com` → gateway IP).
 
+## Documentation
+
+- [Installation guide](docs/INSTALL.md) — local test setup in minutes, or production VPS deploy
+- [User guide](docs/USER-GUIDE.md) — token playbook, honeypot deployment, alerting, MCP triage
+
 ## License
 
 Apache-2.0

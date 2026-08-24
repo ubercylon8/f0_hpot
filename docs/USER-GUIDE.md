@@ -1,0 +1,170 @@
+# User Guide
+
+How to use f0_deception day-to-day: plant tokens, read alerts, run honeypots.
+
+---
+
+## 1. Concepts
+
+| Term | Meaning |
+|---|---|
+| **Token** | a deception artifact (URL, file, hostname, credentials…) tied to an alert |
+| **Incident** | one recorded trigger of a token, with evidence (IP, headers, DNS query…) |
+| **Gateway** | public listener that catches token triggers (HTTP / DNS / SMTP) |
+| **Agent** | endpoint software running honeypot sensors + local canary detectors |
+| **Sensor** | one deception component on an agent (SSH, SMB, planted credential…) |
+
+**Golden rule:** every sensor references a *managed token id*, so all
+detections — network or agent-side — appear in the same incident feed and can
+be revoked/alerted centrally.
+
+## 2. Console tour
+
+Open `http://<console-host>`:
+
+- **Dashboard** – active tokens, 24h incidents, unacknowledged count
+- **Tokens** – create wizard (pick type → optional memo/config → Create).
+  Each token shows its artifacts: URLs to plant, hostnames, or files to download.
+- **Incidents** – live feed; click **ack** after triage. Severity colors:
+  red = high (document opened, credential captured), yellow = medium.
+- **Agents** – fleet status; "edit sensors" opens per-agent config editor
+  (kind, port/path/label, token id, on/off) with *save & deploy*.
+- **Alert Channels** – webhook / syslog / Elasticsearch / Loki destinations.
+
+## 3. Token playbook
+
+### Web bug (URL pixel)
+Create `web_bug` → copy the pixel URL into emails, wikis, bookmark pages,
+HTML documents. Fires when anything fetches it.
+
+### DNS token
+Create `dns` → you get `<id>.tokens.example.com`. Any lookup of it or its
+subdomains alerts. Plant in: `hosts` files, documentation, tool configs.
+
+> Requires your domain's DNS pointed at the gateway.
+
+### Unique email address
+Create `email` → `<id>@tokens.example.com`. Plant in breach-filler accounts,
+old resumes, config comments. Requires MX records.
+
+### QR code
+Create `qr_code` → download the PNG. Print/stick anywhere physical or digital;
+scanning fires a high-severity hit.
+
+### Word/Excel/PDF documents
+Download the generated file and plant it in shared folders, intranets, or as
+bait attachments. Word fetches its embedded remote image on open; Excel fires
+when the hyperlink is clicked. PDF uses open-action/link (viewer dependent).
+
+### Cloned website
+Give it a URL to clone (e.g. your VPN portal). You get a lookalike page on
+your infrastructure with an invisible beacon. Phish-test your users or watch
+for link-scrapers. Any visit = high severity.
+
+### Windows folder
+Create a folder named exactly like the artifact shown (e.g.
+`abc123@tokens.example.com`). When anyone browses that folder over SMB,
+Windows resolves the name via DNS → alert.
+
+### SQL injection canary
+Generates an nginx/Apache snippet redirecting a decoy path (default
+`/search.php`) to our tracker. Deploy the rule on your real web server;
+scanners probing for injection get flagged.
+
+### Sensitive command
+Serves a realistic fake output page (`ifconfig`, `whoami`, …). Wrap it behind
+an alias/bookmark/tool shortcut — if someone runs "the wrong" command from a
+planted doc, you'll know.
+
+### AWS key decoy / Azure service principal decoy
+Generates believable credentials + instructions wiring YOUR cloud tenant's
+audit logs to this platform's ingest URL. Without cloud wiring they are inert
+decorations — do the one-time wiring step in the readme.
+
+### Fast redirect
+302s visitors to any target while capturing them. Use for link-tracking in
+documents or shortened URLs.
+
+## 4. Honeypots (agents)
+
+| Sensor | Port | What it captures |
+|---|---|---|
+| ssh | 22-ish | usernames, passwords, post-login commands |
+| http_login | 8080-ish | login POST creds (user + pass length) |
+| smb | 445 | negotiate probes, **NTLM user/domain/hash** (hashcat format) |
+| rdp | 3389 | connection probes incl. requested security; **CredSSP/NLA creds** |
+| planted_credential | — | bait file reads/tampering/deletion |
+| file_watch | — | access/modification of real sensitive files |
+
+Deployment tips:
+
+- Put agents on juicy subnets (DC-adjacent, user VLANs, DMZ)
+- Name sensors' tokens clearly (`memo: "DC-adjacent SMB"` etc.)
+- For `file_watch`, good targets: `/etc/shadow`, browser cookie stores,
+  KeePass databases
+- For `planted_credential`, use believable names: `passwords.txt`,
+  `.env.prod`, `servicenow_creds.txt` — content ships with plausible defaults
+
+## 5. Alerting
+
+Configure channels under **Alert Channels**, then test with the API:
+
+```sh
+curl -X POST $F0/api/v1/alert-channels/<id>/test
+```
+
+Throttling: max 1 alert per unique (token, source IP) per minute by default
+(`F0_MAX_ALERTS_PER_MINUTE`). Incidents are ALWAYS recorded even when alerts
+are throttled.
+
+Channel notes:
+- **webhook**: JSON POST of the whole alert; `secret` goes in `x-f0-signature`
+- **syslog**: UDP RFC5424, severity-mapped (high→critical)
+- **elasticsearch**: indexes to `<url>/<index>/_doc`
+- **loki**: pushes log lines with labels `{app="f0_deception", severity=…}`
+
+## 6. MCP server (LLM triage)
+
+```jsonc
+// claude_desktop_config.json / opencode config
+{
+  "mcpServers": {
+    "f0_deception": {
+      "command": "node",
+      "args": ["/path/to/apps/mcp/dist/server.js"],
+      "env": { "F0_API_BASE_URL": "http://localhost:18443" }
+    }
+  }
+}
+```
+
+Tools available to the LLM: create/list/revoke tokens, list incidents +
+detail/acknowledge, list agents, platform stats. No destructive operations.
+
+## 7. Triage workflow
+
+1. Incident appears (console / SIEM / LLM ping)
+2. Open detail: source IP, UA, exact request/DNS query
+3. Assess: internal IP → possible compromise walk-back; external → likely scan
+4. Ack the incident; escalate via your normal IR process if warranted
+
+## 8. Legal & safety
+
+- Only deploy honeypots/cloned sites on systems and networks you own or are
+  authorized to test
+- Cloned-site tokens impersonate pages — use your own properties
+- Credential material captured by honeypots is attacker-supplied; handle per
+  your evidence procedures
+- The platform itself is internet-exposed attack surface: keep it patched,
+  restrict console access (VPN/reverse proxy auth), monitor the monitor
+
+## 9. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| No incidents but curl works | gateway's `F0_API_BASE_URL` must point at the API |
+| DNS token silent | check :53/:15353 listener + NS/A records; test with `dig -p PORT @host name` |
+| Agent shows offline | heartbeat every 60s — check `~/.f0-deception/agent.yaml` server URL matches |
+| "sensor not available in this build" | rebuild the agent binary |
+| Email token silent | MX record + port 25 reachability; spam filters may block first |
+| Word doc doesn't alert | viewer blocked external content; PDF viewers vary — prefer web bugs for reliability |
