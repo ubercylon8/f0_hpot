@@ -18,6 +18,9 @@ export default function App() {
   const [channels, setChannels] = useState<AlertChannel[]>([]);
   const [agents, setAgents] = useState<AgentRow[]>([]);
 
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       const [t, i, c, a] = await Promise.all([
@@ -30,14 +33,16 @@ export default function App() {
       setIncidents(i);
       setChannels(c);
       setAgents(a);
+      setLastUpdated(new Date());
+      setFetchError(null);
     } catch (err) {
-      console.error("failed to load console data:", err);
+      setFetchError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 15_000);
+    const timer = setInterval(() => void refresh(), 5_000);
     return () => clearInterval(timer);
   }, [refresh]);
 
@@ -70,6 +75,20 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <div className="ml-auto flex items-center gap-3 text-xs text-neutral-500">
+          {fetchError && (
+            <span className="text-red-400">⚠ {fetchError}</span>
+          )}
+          {lastUpdated && (
+            <span>updated {lastUpdated.toLocaleTimeString()}</span>
+          )}
+          <button
+            onClick={() => void refresh()}
+            className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
+          >
+            refresh
+          </button>
+        </div>
       </header>
       <main className="p-6 max-w-6xl mx-auto">
         {tab === "dashboard" && <Dashboard tokens={tokens} incidents={incidents} />}
@@ -177,6 +196,7 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
             <th className="py-2">Token ID</th>
             <th>Type</th>
             <th>Memo</th>
+            <th>Hits</th>
             <th>Status</th>
             <th>Created</th>
             <th></th>
@@ -188,6 +208,9 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
               <td className="py-2 font-mono text-xs">{t.id}</td>
               <td>{t.type}</td>
               <td className="text-neutral-400">{t.memo ?? "—"}</td>
+              <td className={t.hitCount ? "text-amber-400 font-medium" : "text-neutral-600"}>
+                {t.hitCount ?? 0}
+              </td>
               <td>
                 <span
                   className={
