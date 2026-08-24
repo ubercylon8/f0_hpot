@@ -288,15 +288,28 @@ export function registerTokenRoutes(
         return reply.notFound("no active token for this incident");
       }
 
-      // The gateway forwards candidate events; the token's own type rules
-      // are authoritative for whether this event is really a hit.
-      const def = getTokenType(token.type as Parameters<typeof getTokenType>[0]);
-      const match = def?.matchTrigger(
-        parsed.data.event as never,
-        token.id,
-      );
-      if (!def || !match?.matched) {
-        return reply.notFound("event does not match this token's triggers");
+      // Agent-reported detections carry their own sensor identity and
+      // severity; gateway events must satisfy the token's type rules.
+      const eventRecord = parsed.data.event as Record<string, unknown>;
+      const detail = eventRecord["detail"] as Record<string, unknown> | undefined;
+      const agentReported =
+        typeof detail?.["sensor"] === "string" && detail["sensor"].length > 0;
+
+      let severity: string;
+      if (agentReported) {
+        severity = parsed.data.severity;
+      } else {
+        // The gateway forwards candidate events; the token's own type rules
+        // are authoritative for whether this event is really a hit.
+        const def = getTokenType(token.type as Parameters<typeof getTokenType>[0]);
+        const match = def?.matchTrigger(
+          parsed.data.event as never,
+          token.id,
+        );
+        if (!def || !match?.matched) {
+          return reply.notFound("event does not match this token's triggers");
+        }
+        severity = match.severity;
       }
 
       const incidentId = `inc_${Date.now().toString(36)}${Math.random()
@@ -306,7 +319,7 @@ export function registerTokenRoutes(
         .values({
           id: incidentId,
           tokenId: token.id,
-          severity: match.severity,
+          severity,
           event: parsed.data.event,
           seenAt: new Date().toISOString(),
         })
@@ -316,7 +329,7 @@ export function registerTokenRoutes(
       void dispatcher.dispatch({
         tokenId: token.id,
         tokenType: token.type,
-        severity: match.severity,
+        severity,
         incidentId,
         seenAt: new Date().toISOString(),
         event: parsed.data.event as TriggerEvent,

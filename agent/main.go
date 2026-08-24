@@ -93,6 +93,8 @@ func main() {
 
 	sensors.Register(sensors.HTTPLoginSensor{})
 	sensors.Register(sensors.SSHSensor{})
+	sensors.Register(sensors.SMBSensor{})
+	sensors.Register(sensors.RDPSensor{})
 	sensors.Register(sensors.PlantedCredentialSensor{})
 	sensors.Register(sensors.FileWatchSensor{})
 

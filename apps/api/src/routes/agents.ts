@@ -23,7 +23,7 @@ export function verifyAgentKey(presented: string, storedHash: string): boolean {
 
 const SENSOR_CONFIG_SCHEMA = z.array(
   z.object({
-    kind: z.enum(["ssh", "http_login", "planted_credential", "file_watch"]),
+    kind: z.enum(["ssh", "http_login", "smb", "rdp", "planted_credential", "file_watch"]),
     enabled: z.boolean().default(true),
     config: z.record(z.string(), z.unknown()).default({}),
   }),
