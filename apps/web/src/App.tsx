@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, type Incident, type TokenRow, type AlertChannel, type AgentRow } from "./api.js";
 
 const TOKEN_TYPES = [
@@ -131,11 +131,58 @@ function Dashboard({ tokens, incidents }: { tokens: TokenRow[]; incidents: Incid
   );
 }
 
+function TokenIncidents({ tokenId }: { tokenId: string }) {
+  const [incidents, setIncidents] = useState<Incident[] | null>(null);
+
+  useEffect(() => {
+    api
+      .tokenIncidents(tokenId)
+      .then(setIncidents)
+      .catch(() => setIncidents([]));
+  }, [tokenId]);
+
+  if (incidents === null) return <p className="text-xs text-neutral-500">loading…</p>;
+  if (incidents.length === 0)
+    return <p className="text-xs text-neutral-500">No incidents for this token yet.</p>;
+
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-neutral-400 font-medium">
+        {incidents.length} incident(s) for this token
+      </p>
+      {incidents.map((i) => {
+        const { label, sourceIp } = incidentSummary(i);
+        return (
+          <div key={i.id} className="flex items-center gap-3 text-xs">
+            <span className={`font-mono uppercase ${SEVERITY_COLOR[i.severity]}`}>
+              {i.severity}
+            </span>
+            <span className="text-neutral-300 truncate flex-1">{label}</span>
+            <span className="text-neutral-500">{sourceIp}</span>
+            <span className="text-neutral-500">{new Date(i.seenAt).toLocaleString()}</span>
+            {!i.acknowledged && (
+              <button
+                onClick={() => void api.ackIncident(i.id).then(() => {
+                  api.tokenIncidents(tokenId).then(setIncidents);
+                })}
+                className="border border-neutral-700 hover:border-neutral-500 rounded px-1.5"
+              >
+                ack
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => void }) {
   const [type, setType] = useState<string>("web_bug");
   const [memo, setMemo] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   async function create() {
     setError(null);
@@ -205,7 +252,8 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
         </thead>
         <tbody>
           {tokens.map((t) => (
-            <tr key={t.id} className="border-b border-neutral-900 hover:bg-neutral-900/50">
+            <Fragment key={t.id}>
+            <tr className="border-b border-neutral-900 hover:bg-neutral-900/50">
               <td className="py-2 font-mono text-xs">{t.id}</td>
               <td>{t.type}</td>
               <td className="text-neutral-400">{t.memo ?? "—"}</td>
@@ -227,6 +275,12 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
               </td>
               <td className="text-neutral-400">{new Date(t.createdAt).toLocaleString()}</td>
               <td className="text-right">
+                <button
+                  onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}
+                  className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-0.5 text-xs mr-2"
+                >
+                  history
+                </button>
                 {t.status !== "revoked" && (
                   <button
                     onClick={() => void api.revokeToken(t.id).then(onChange)}
@@ -237,6 +291,14 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
                 )}
               </td>
             </tr>
+            {historyFor === t.id && (
+              <tr className="border-b border-neutral-900">
+                <td colSpan={6} className="py-3 px-2 bg-neutral-950">
+                  <TokenIncidents tokenId={t.id} />
+                </td>
+              </tr>
+            )}
+            </Fragment>
           ))}
         </tbody>
       </table>

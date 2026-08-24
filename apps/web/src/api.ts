@@ -81,6 +81,8 @@ export const api = {
   listIncidents: () => request<Incident[]>("/incidents"),
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
+  tokenIncidents: (tokenId: string) =>
+    request<Incident[]>(`/tokens/${tokenId}/incidents`),
   listChannels: () => request<AlertChannel[]>("/alert-channels"),
   listReleases: () =>
     request<{ files: { filename: string; size: number; url: string }[]; manifest: string | null }>(
