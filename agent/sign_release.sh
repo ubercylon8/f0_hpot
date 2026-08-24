@@ -25,7 +25,11 @@ files = {}
 for b in sys.argv[2:]:
     h = hashlib.sha256(open(b, "rb").read()).hexdigest()
     files[os.path.basename(b)] = {"sha256": h, "size": os.path.getsize(b)}
-json.dump({"version": version, "files": files}, open(sys.stdout.fileno(), "w"))
+# Canonical form MUST match the agent's verifier: Go json.Marshal encodes
+# maps with sorted keys and compact separators.
+json.dump({"files": files, "version": version},
+          open(sys.stdout.fileno(), "w"),
+          sort_keys=True, separators=(",", ":"))
 PYEOF
 
 # 2. Sign the exact manifest bytes with Ed25519.
@@ -45,4 +49,4 @@ PYEOF
 rm -f "$MANIFEST" "$SIGN_INPUT" /tmp/f0-release.sig
 
 echo "Public key (embed via -ldflags '-X update.UpdatePublicKey=<b64>'):"
-echo "  openssl pkey -in $PRIVKEY_FILE -pubout"
+echo "  openssl pkey -in $PRIVKEY_FILE -pubout | grep -v '---' | tr -d '\n' | base64 -w0"
