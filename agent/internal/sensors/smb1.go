@@ -1,9 +1,11 @@
 package sensors
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -132,14 +134,143 @@ func buildSMB1SessionSetupReply(req []byte, status uint32, uid uint16, blob []by
 	return append(out, native...)
 }
 
+// buildSMB1LegacyNegotiateResponse: for clients that did NOT request
+// extended security (flags2 EXTENDED_SECURITY clear). Same 34-byte
+// parameter layout, but capabilities WITHOUT CAP_EXTENDED_SECURITY and
+// the raw 8-byte challenge as Data (clients hash against it directly).
+func buildSMB1LegacyNegotiateResponse(req []byte) ([]byte, [8]byte, error) {
+	var challenge [8]byte
+	if _, err := rand.Read(challenge[:]); err != nil {
+		return nil, challenge, err
+	}
+
+	hdr := make([]byte, 32)
+	copy(hdr[0:4], "\xffSMB")
+	hdr[4] = smb1CmdNegotiate
+	hdr[9] = req[9]
+	// LONG_NAMES only — no STATUS32/EXT bits in legacy mode
+	flags2 := binary.LittleEndian.Uint16(req[10:12]) &^ 0x8800
+	flags2 |= 0x0400
+	binary.LittleEndian.PutUint16(hdr[10:12], flags2)
+	copy(hdr[12:32], req[12:32])
+
+	words := make([]byte, 0, 35)
+	words = append(words, 17) // WordCount
+	w := func(v uint16) { words = append(words, byte(v), byte(v>>8)) }
+	w32 := func(v uint32) { words = append(words, byte(v), byte(v>>8), byte(v>>16), byte(v>>24)) }
+	w(5)                        // DialectIndex: NT LM 0.12
+	words = append(words, 0x03) // SecurityMode
+	words = append(words, 0x00) // Reserved
+	w(50)                       // MaxMpxCount
+	w(1)                        // MaxNumberVCs
+	w32(65535)                  // MaxBufferSize
+	w32(65535)                  // MaxRawSize
+	w32(0)                      // SessionKey
+	w32(0x000002D0)             // Capabilities: NO extended security
+	words = append(words, 0x20, 0xC4, 0x9A, 0x0D)
+	words = append(words, 0xD5, 0x35, 0xD9, 0x01)
+	w(0)                     // ServerTimeZone
+	words = append(words, 8) // ChallengeLength
+
+	out := append(hdr, words...)
+	out = append(out, 0x08, 0x00) // ByteCount = 8
+	return append(out, challenge[:]...), challenge, nil
+}
+
+// clientRequestedExtendedSecurity: flags2 EXTENDED_SECURITY_NEGOTIATE bit.
+func clientRequestedExtendedSecurity(req []byte) bool {
+	if len(req) < 12 {
+		return false
+	}
+	return binary.LittleEndian.Uint16(req[10:12])&0x0800 != 0
+}
+
+// handleSMB1LegacySetup captures credentials from a legacy (non-SPNEGO)
+// Session Setup AndX: ANSI/Unicode password fields + account + domain.
+// Request layout (WordCount 13): AndX(3) MaxBuffer(2) MaxMpx(2) VC(2)
+// SessionKey(4) AnsiPwdLen(2) UniPwdLen(2) Reserved(4) Capabilities(4),
+// ByteCount(2), then data: ansiPwd, uniPwd, account, domain, nativeOS...
+// Field offsets are absolute from the start of the SMB message.
+func handleSMB1LegacySetup(t *smbTransport, buf []byte, challenge [8]byte, uid uint16, tokenID string, report Reporter) {
+	if len(buf) < 61 {
+		return
+	}
+	ansiPwdLen := int(binary.LittleEndian.Uint16(buf[47:49]))
+	uniPwdLen := int(binary.LittleEndian.Uint16(buf[49:51]))
+	accountLen := int(binary.LittleEndian.Uint16(buf[51:53]))
+
+	// Data layout: ansiPwd, uniPwd, account ("DOMAIN\user" or "user"),
+	// nativeOS, lanMan... starting after ByteCount: 32 hdr + 1 wc + wc*2
+	// params + 2 bc. No separate domain-length field in legacy setups.
+	dataStart := 35 + int(buf[32])*2
+	if dataStart+ansiPwdLen+uniPwdLen+accountLen > len(buf) {
+		return
+	}
+
+	unicode := binary.LittleEndian.Uint16(buf[10:12])&0x8000 != 0
+	decode := func(b []byte) string {
+		if unicode {
+			return utf16ToString(b)
+		}
+		return string(b)
+	}
+
+	pos := dataStart
+	ansiPwd := buf[pos : pos+ansiPwdLen]
+	pos += ansiPwdLen
+	uniPwd := buf[pos : pos+uniPwdLen]
+	pos += uniPwdLen
+	account := strings.TrimRight(decode(buf[pos:pos+accountLen]), "\x00")
+
+	// Account is often "DOMAIN\user".
+	domain := ""
+	if slash := strings.LastIndex(account, "\\"); slash >= 0 {
+		domain = account[:slash]
+		account = account[slash+1:]
+	}
+
+	line := fmt.Sprintf("%s::%s:%s:%s:%s",
+		account, domain, hexLower(challenge[:]),
+		hexLower(ansiPwd), hexLower(uniPwd))
+	log.Printf("[smb1] captured legacy credentials user=%q domain=%q from %s",
+		account, domain, remoteIP(t.conn))
+	report(Trigger{
+		Sensor:   "smb",
+		TokenID:  tokenID,
+		Severity: "high",
+		Detail: map[string]interface{}{
+			"event":     "legacy_credentials",
+			"protocol":  "SMB1-legacy",
+			"source_ip": remoteIP(t.conn),
+			"username":  account,
+			"domain":    domain,
+			"hashcat":   line,
+		},
+		SeenAt: time.Now().UTC(),
+	})
+	_ = t.writeMsg(buildSMB1SessionSetupReply(buf, statusLogonFailure, uid, nil))
+}
+
 // handleSMB1 runs the SMB1 state machine after the negotiate frame.
 func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporter) {
-	// Negotiate
+	// Negotiate: extended (SPNEGO) vs legacy (raw challenge) by flags2.
 	if len(firstMsg) < 35 || firstMsg[4] != smb1CmdNegotiate {
 		return
 	}
-	if err := t.writeMsg(buildSMB1NegotiateResponse(firstMsg)); err != nil {
-		return
+	var challenge [8]byte
+	if clientRequestedExtendedSecurity(firstMsg) {
+		if err := t.writeMsg(buildSMB1NegotiateResponse(firstMsg)); err != nil {
+			return
+		}
+	} else {
+		resp, chal, err := buildSMB1LegacyNegotiateResponse(firstMsg)
+		if err != nil {
+			return
+		}
+		challenge = chal
+		if err := t.writeMsg(resp); err != nil {
+			return
+		}
 	}
 
 	uid := uint16(0x1000)
@@ -149,7 +280,10 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 			return
 		}
 		if buf[4] != smb1CmdSessionSetup {
-			log.Printf("[smb1-debug] unexpected cmd=0x%02x", buf[4])
+			return
+		}
+		if !clientRequestedExtendedSecurity(firstMsg) {
+			handleSMB1LegacySetup(t, buf, challenge, uid, tokenID, report)
 			return
 		}
 		blob := findNTLMBlob(buf)
