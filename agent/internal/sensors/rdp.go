@@ -83,8 +83,25 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 
 	log.Printf("[rdp] conn request from %s (%v)", detail["source_ip"], detail["requested_security"])
 
-	// X.224 Connection Confirm: minimal, no negotiation payload.
-	ccf := []byte{3, 0, 0, 11, 0xd0, 0, 0, 0, 0, 0, 0}
+	// X.224 Connection Confirm. When the client requested CredSSP/NLA we
+	// must answer with an RDP_NEG_RSP selecting PROTOCOL_HYBRID (2) —
+	// real mstsc aborts if the server doesn't echo a protocol selection.
+	// Clients that requested plain TLS get a bare CC (they'll start TLS
+	// without NLA and we won't capture creds there).
+	requested, _ := detail["requested_security"].(string)
+	var ccf []byte
+	switch requested {
+	case "credssp(nla)":
+		// TPKT(4) LI(1) type d0 dst(2) src(2) class(1) + RDP_NEG_RSP(8):
+		// type 02 flags 00 length 0008 selectedProtocol PROTOCOL_HYBRID
+		ccf = []byte{3, 0, 0, 0x13, 0x0e, 0xd0, 0, 0, 0, 0, 0,
+			0x02, 0x00, 0x08, 0x00, 0x02, 0, 0, 0}
+	case "tls":
+		ccf = []byte{3, 0, 0, 0x13, 0x0e, 0xd0, 0, 0, 0, 0, 0,
+			0x02, 0x00, 0x08, 0x00, 0x01, 0, 0, 0} // PROTOCOL_TLS
+	default:
+		ccf = []byte{3, 0, 0, 11, 0xd0, 0, 0, 0, 0, 0, 0}
+	}
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, _ = conn.Write(ccf)
 	time.Sleep(200 * time.Millisecond)
@@ -97,9 +114,8 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 		SeenAt:   time.Now().UTC(),
 	})
 
-	// If the client requested NLA/CredSSP, upgrade to TLS and try to
-	// capture credentials through the NTLM exchange.
-	if proto, _ := detail["requested_security"].(string); proto == "credssp(nla)" || proto == "tls+credssp" {
+	// NLA/CredSSP: upgrade to TLS and capture the NTLM exchange.
+	if requested == "credssp(nla)" || requested == "tls+credssp" {
 		tlsConn := upgradeRDPToTLS(conn)
 		if tlsConn != nil {
 			handleRDPCredSSP(tlsConn, tokenID, report)
