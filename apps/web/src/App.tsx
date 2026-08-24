@@ -2,21 +2,21 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, type Incident, type TokenRow, type AlertChannel, type AgentRow } from "./api.js";
 
 const TOKEN_TYPES = [
-  { id: "web_bug", label: "Web Bug", hint: "1x1 pixel URL", fields: [] },
-  { id: "dns", label: "DNS Token", hint: "unique hostname", fields: [] },
-  { id: "email", label: "Unique Email", hint: "trigger address (needs MX)", fields: [] },
-  { id: "qr_code", label: "QR Code", hint: "scan-to-trigger", fields: [] },
-  { id: "word_doc", label: "Word Document", hint: "remote-image .docx", fields: [] },
-  { id: "excel_doc", label: "Excel Workbook", hint: "hyperlink .xlsx", fields: [] },
-  { id: "pdf_doc", label: "PDF Document", hint: "open-action + link", fields: [] },
-  { id: "windows_folder", label: "Windows Folder", hint: "DNS-resolving folder name", fields: [] },
-  { id: "cloned_website", label: "Cloned Website", hint: "beaconed page clone", fields: ["target_url"] },
-  { id: "sql_injection", label: "SQL Injection Canary", hint: "decoy endpoint rules", fields: ["decoy_path", "server_kind"] },
-  { id: "sensitive_cmd", label: "Sensitive Command", hint: "fake cmd output page", fields: ["cmd_name"] },
-  { id: "fast_redirect", label: "Fast Redirect", hint: "capture + 302", fields: ["target_url"] },
-  { id: "aws_keys", label: "AWS Key Decoy", hint: "decoy credentials + wiring", fields: [] },
-  { id: "azure_config", label: "Azure SP Decoy", hint: "decoy client-id/secret", fields: [] },
-  { id: "honeypot", label: "Honeypot Link", hint: "reference token for agent sensors", fields: [] },
+  { id: "web_bug", label: "Web Bug", hint: "1x1 pixel URL", fields: [], group: "Network" },
+  { id: "dns", label: "DNS Token", hint: "unique hostname", fields: [], group: "Network" },
+  { id: "email", label: "Unique Email", hint: "trigger address (needs MX)", fields: [], group: "Network" },
+  { id: "qr_code", label: "QR Code", hint: "scan-to-trigger", fields: [], group: "Documents" },
+  { id: "word_doc", label: "Word Document", hint: "remote-image .docx", fields: [], group: "Documents" },
+  { id: "excel_doc", label: "Excel Workbook", hint: "hyperlink .xlsx", fields: [], group: "Documents" },
+  { id: "pdf_doc", label: "PDF Document", hint: "open-action + link", fields: [], group: "Documents" },
+  { id: "windows_folder", label: "Windows Folder", hint: "DNS-resolving folder name", fields: [], group: "Network" },
+  { id: "cloned_website", label: "Cloned Website", hint: "beaconed page clone", fields: ["target_url"], group: "Documents" },
+  { id: "sql_injection", label: "SQL Injection Canary", hint: "decoy endpoint rules", fields: ["decoy_path", "server_kind"], group: "Network" },
+  { id: "sensitive_cmd", label: "Sensitive Command", hint: "fake cmd output page", fields: ["cmd_name"], group: "Network" },
+  { id: "fast_redirect", label: "Fast Redirect", hint: "capture + 302", fields: ["target_url"], group: "Network" },
+  { id: "aws_keys", label: "AWS Key Decoy", hint: "decoy credentials + wiring", fields: [], group: "Cloud Decoys" },
+  { id: "azure_config", label: "Azure SP Decoy", hint: "decoy client-id/secret", fields: [], group: "Cloud Decoys" },
+  { id: "honeypot", label: "Honeypot Link", hint: "reference token for agent sensors", fields: [], group: "Agent" },
 ] as const;
 
 type TokenField = "target_url" | "decoy_path" | "server_kind" | "cmd_name";
@@ -229,12 +229,16 @@ function TokensView({ tokens, onChange }: { tokens: TokenRow[]; onChange: () => 
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm"
+            className="bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm w-72"
           >
-            {TOKEN_TYPES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label} — {t.hint}
-              </option>
+            {["Network", "Documents", "Cloud Decoys", "Agent"].map((group) => (
+              <optgroup key={group} label={group}>
+                {TOKEN_TYPES.filter((t) => t.group === group).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label} — {t.hint}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
           {tokenFields(type).includes("target_url") && (
