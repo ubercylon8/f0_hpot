@@ -36,7 +36,7 @@ export interface TokenTypeDefinition<C = Record<string, unknown>> {
   id: string;
   label: string;
   description: string;
-  group: "network" | "document" | "agent";
+  group: "network" | "document" | "agent" | "cloud";
 
   /** Creation-time config validation. */
   configSchema: ZodType<C>;

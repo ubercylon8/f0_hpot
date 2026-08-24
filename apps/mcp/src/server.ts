@@ -61,6 +61,7 @@ s.tool(
       "excel_doc",
       "windows_folder",
       "sql_injection",
+      "aws_keys",
       "sensitive_cmd",
       "fast_redirect",
     ]).describe("Token type"),

@@ -18,6 +18,7 @@ export const tokenTypeSchema = z.enum([
   "cloned_website",
   "sql_injection",
   "fast_redirect",
+  "aws_keys",
 ]);
 export type TokenType = z.infer<typeof tokenTypeSchema>;
 
