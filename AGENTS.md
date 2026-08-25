@@ -3,6 +3,11 @@
 Open-source, self-hosted deception platform: agentless canarytokens (reach-back)
 plus agent-deployed honeypots/sensors, web console, and MCP server.
 
+## Hand-off
+
+Continuing this work? Read `docs/HANDOFF.md` — pending items, architecture
+decision rationale, and debugging gotchas.
+
 ## Repo layout
 
 - `apps/api` — Fastify REST API + Drizzle ORM + SQLite (WAL). Source of truth for tokens, incidents, agents, alert channels.

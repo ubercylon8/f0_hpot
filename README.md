@@ -44,6 +44,7 @@ DNS record (`*.tokens.yourdomain.com` → gateway IP).
 
 - [Installation guide](docs/INSTALL.md) — local test setup in minutes, or production VPS deploy
 - [User guide](docs/USER-GUIDE.md) — token playbook, honeypot deployment, alerting, MCP triage
+- [Hand-off document](docs/HANDOFF.md) — project state, pending work, gotchas (start here if continuing the work)
 
 ## License
 
