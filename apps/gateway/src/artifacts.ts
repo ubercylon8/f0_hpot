@@ -10,6 +10,12 @@ export interface ArtifactResponderOptions {
   gatewayOrigin: string;
   /** Base URL of the API, for internal token-config lookups. */
   apiBaseUrl: string;
+  /** Shared secret authorizing gateway→API internal calls (F0_INTERNAL_SECRET). */
+  apiInternalSecret?: string;
+}
+
+function apiHeaders(secret?: string): Record<string, string> {
+  return secret ? { authorization: `Bearer ${secret}` } : {};
 }
 
 interface CachedConfig {
@@ -75,7 +81,10 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
     try {
       const res = await fetch(
         `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-config`,
-        { signal: AbortSignal.timeout(3000) },
+        {
+          signal: AbortSignal.timeout(3000),
+          headers: apiHeaders(opts.apiInternalSecret),
+        },
       );
       if (!res.ok) return null;
       const data = (await res.json()) as CachedConfig;
@@ -164,7 +173,10 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
       try {
         const pres = await fetch(
           `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-page`,
-          { signal: AbortSignal.timeout(5000) },
+          {
+            signal: AbortSignal.timeout(5000),
+            headers: apiHeaders(opts.apiInternalSecret),
+          },
         );
         if (pres.ok) {
           const body = Buffer.from(await pres.arrayBuffer());

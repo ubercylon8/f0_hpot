@@ -57,6 +57,9 @@ F0_API_BASE_URL=http://127.0.0.1:18443 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 npx 
 | `F0_MAIL_DOMAINS` | gateway smtp | = token domains | accepted email-token domains |
 | `F0_API_BASE_URL` | gateway, mcp | `http://127.0.0.1:8443` | console API location |
 | `F0_MAX_ALERTS_PER_MINUTE` | api | `1` | alert throttle per (token, source IP) |
+| `F0_GEOIP_DB` | api | unset (disabled) | MaxMind .mmdb path for incident source-IP geo enrichment |
+| `F0_ADMIN_TOKEN` | api | unset (open-mode if no keys) | console master key; bootstrap for `POST /api/v1/auth/keys` |
+| `F0_INTERNAL_SECRET` | api, gateway | unset | gateway→API shared secret (incident forwarding, internal-config/page) |
 | `F0_ENROLLMENT_TOKEN` | api | unset (enroll disabled) | bootstrap token for agent enrollment |
 | `F0_AGENT_POLL_INTERVAL` | api | `60` | heartbeat interval served to agents |
 | `F0_MCP_HTTP` / `F0_MCP_PORT` | mcp | stdio / `8444` | HTTP transport for MCP |

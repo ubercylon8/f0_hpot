@@ -83,5 +83,34 @@ export function migrate(db: Db): void {
       label TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS release_keys (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
+
+  // Additive column migrations (SQLite has no IF NOT EXISTS for columns).
+  addColumnIfMissing(client, "incidents", "notes", "notes TEXT");
+  addColumnIfMissing(client, "incidents", "source_ip", "source_ip TEXT");
+  addColumnIfMissing(client, "incidents", "geo", "geo TEXT");
+  addColumnIfMissing(client, "api_keys", "last_used_at", "last_used_at TEXT");
+  client.exec(
+    "CREATE INDEX IF NOT EXISTS incidents_source_ip_idx ON incidents (source_ip)",
+  );
+}
+
+function addColumnIfMissing(
+  client: Database.Database,
+  table: string,
+  column: string,
+  ddl: string,
+): void {
+  const cols = client.pragma(`table_info(${table})`) as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    client.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
 }

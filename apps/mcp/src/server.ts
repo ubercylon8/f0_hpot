@@ -122,15 +122,14 @@ s.tool(
 
 s.tool(
   "get_incident_detail",
-  "Full evidence for one incident: raw request/DNS data, source IP, user agent.",
+  "Full evidence for one incident: raw request/DNS data, source IP, geo, notes.",
   { incidentId: z.string() },
-  async ({ incidentId }) => {
-    // v1: detail comes from the global feed (id match); dedicated endpoint later.
-    const all = await api<unknown[]>("/incidents?limit=500");
-    const found = all.find((i) => (i as { id: string }).id === incidentId);
-    if (!found) throw new Error(`incident ${incidentId} not found in recent feed`);
-    return { content: [{ type: "text", text: JSON.stringify(found, null, 2) }] };
-  },
+  async ({ incidentId }) => ({
+    content: [{
+      type: "text",
+      text: JSON.stringify(await api(`/incidents/${incidentId}`), null, 2),
+    }],
+  }),
 );
 
 s.tool(

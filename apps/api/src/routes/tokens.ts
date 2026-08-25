@@ -12,11 +12,13 @@ import { tokens, incidents, tokenFiles } from "../db/schema.js";
 import { newId, newTokenId } from "../ids.js";
 import type { AlertDispatcher } from "../alerts/dispatcher.js";
 import type { TriggerEvent } from "@f0/deception-shared";
+import { extractSourceIp, type GeoLookup } from "../geoip.js";
 
 export function registerTokenRoutes(
   app: FastifyInstance,
   db: Db,
   dispatcher: AlertDispatcher,
+  geo: GeoLookup,
 ): void {
   app.post("/api/v1/tokens", async (request, reply) => {
       const parsed = z
@@ -190,7 +192,11 @@ export function registerTokenRoutes(
 
   // Internal: gateway artifact rendering needs the token type + config.
   app.get("/api/v1/incidents", async (request) => {
-    const query = request.query as { limit?: string; acknowledged?: string };
+    const query = request.query as {
+      limit?: string;
+      acknowledged?: string;
+      source_ip?: string;
+    };
     const limit = Math.min(Number(query.limit ?? 200) || 200, 500);
     let stmt = db
       .select({
@@ -201,6 +207,9 @@ export function registerTokenRoutes(
         acknowledged: incidents.acknowledged,
         event: incidents.event,
         seenAt: incidents.seenAt,
+        sourceIp: incidents.sourceIp,
+        geo: incidents.geo,
+        notes: incidents.notes,
       })
       .from(incidents)
       .innerJoin(tokens, eq(incidents.tokenId, tokens.id))
@@ -210,7 +219,51 @@ export function registerTokenRoutes(
     if (query.acknowledged === "false") {
       stmt = stmt.where(eq(incidents.acknowledged, false));
     }
+    if (query.source_ip) {
+      stmt = stmt.where(eq(incidents.sourceIp, query.source_ip));
+    }
     return stmt.all();
+  });
+
+  app.get("/api/v1/incidents/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const row = db
+      .select({
+        id: incidents.id,
+        tokenId: incidents.tokenId,
+        tokenType: tokens.type,
+        severity: incidents.severity,
+        acknowledged: incidents.acknowledged,
+        event: incidents.event,
+        seenAt: incidents.seenAt,
+        sourceIp: incidents.sourceIp,
+        geo: incidents.geo,
+        notes: incidents.notes,
+      })
+      .from(incidents)
+      .innerJoin(tokens, eq(incidents.tokenId, tokens.id))
+      .where(eq(incidents.id, id))
+      .get();
+    if (!row) return reply.notFound("incident not found");
+    return row;
+  });
+
+  // Operator triage notes (free text, replaces on each PATCH).
+  app.patch("/api/v1/incidents/:id/notes", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({ notes: z.string().max(4000).nullable() })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const result = db
+      .update(incidents)
+      .set({ notes: parsed.data.notes })
+      .where(eq(incidents.id, id))
+      .run();
+    if (result.changes === 0) return reply.notFound("incident not found");
+    return reply.send({ ok: true });
   });
 
   app.patch("/api/v1/incidents/:id/ack", async (request, reply) => {
@@ -315,6 +368,10 @@ export function registerTokenRoutes(
       const incidentId = `inc_${Date.now().toString(36)}${Math.random()
         .toString(36)
         .slice(2, 8)}`;
+      // Extract + enrich the source IP once at ingest; the event JSON stays
+      // the authoritative full record.
+      const sourceIp = extractSourceIp(eventRecord) ?? null;
+      const geoInfo = sourceIp ? geo.lookup(sourceIp) : null;
       db.insert(incidents)
         .values({
           id: incidentId,
@@ -322,6 +379,8 @@ export function registerTokenRoutes(
           severity,
           event: parsed.data.event,
           seenAt: new Date().toISOString(),
+          sourceIp,
+          geo: geoInfo,
         })
         .run();
 

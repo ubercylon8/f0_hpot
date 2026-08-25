@@ -30,10 +30,16 @@ export const incidents = sqliteTable(
     seenAt: text("seen_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
+    notes: text("notes"),
+    // Extracted at insert time for filtering/enrichment (event JSON holds
+    // the authoritative full record).
+    sourceIp: text("source_ip"),
+    geo: text("geo", { mode: "json" }),
   },
   (t) => [
     index("incidents_token_idx").on(t.tokenId),
     index("incidents_seen_idx").on(t.seenAt),
+    index("incidents_source_ip_idx").on(t.sourceIp),
   ],
 );
 
@@ -101,6 +107,19 @@ export const apiKeys = sqliteTable("api_keys", {
   id: text("id").primaryKey(),
   keyHash: text("key_hash").notNull(),
   label: text("label").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  lastUsedAt: text("last_used_at"),
+});
+
+export const releaseKeys = sqliteTable("release_keys", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  // base64 SPKI DER (raw 32-byte Ed25519 key = last 32 bytes).
+  publicKey: text("public_key").notNull(),
+  // base64 PKCS8 DER — signs release manifests server-side. Protect the DB.
+  privateKey: text("private_key").notNull(),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

@@ -1,4 +1,22 @@
 const BASE = "/api/v1";
+const KEY_STORAGE = "f0_api_key";
+
+export function getApiKey(): string {
+  return localStorage.getItem(KEY_STORAGE) ?? "";
+}
+
+export function setApiKey(key: string): void {
+  if (key) localStorage.setItem(KEY_STORAGE, key);
+  else localStorage.removeItem(KEY_STORAGE);
+}
+
+/** Thrown on HTTP 401 so the app can show the login gate. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("401: authentication required");
+    this.name = "UnauthorizedError";
+  }
+}
 
 export interface TokenArtifact {
   kind: "url" | "hostname" | "file_download";
@@ -16,6 +34,14 @@ export interface TokenRow {
   hitCount?: number;
 }
 
+export interface GeoInfo {
+  country?: string;
+  countryName?: string;
+  city?: string;
+  asn?: number;
+  org?: string;
+}
+
 export interface Incident {
   id: string;
   tokenId: string;
@@ -30,6 +56,10 @@ export interface Incident {
     detail?: Record<string, unknown>;
   };
   seenAt: string;
+  // Populated at ingest (GeoIP enrichment); null when disabled/unmatched.
+  sourceIp?: string | null;
+  geo?: GeoInfo | null;
+  notes?: string | null;
 }
 
 export interface SensorRow {
@@ -59,15 +89,30 @@ export interface AlertChannel {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const key = getApiKey();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(key ? { authorization: `Bearer ${key}` } : {}),
+    },
   });
+  if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
   }
   return (await res.json()) as T;
+}
+
+/** Validate a key against the API without storing it. Throws on reject. */
+export async function login(key: string): Promise<void> {
+  const res = await fetch(`${BASE}/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
+  if (!res.ok) throw new Error(`${res.status}: invalid key`);
 }
 
 export const api = {
@@ -79,8 +124,14 @@ export const api = {
     }),
   revokeToken: (id: string) => request(`/tokens/${id}`, { method: "DELETE" }),
   listIncidents: () => request<Incident[]>("/incidents"),
+  getIncident: (id: string) => request<Incident>(`/incidents/${id}`),
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
+  setIncidentNotes: (id: string, notes: string | null) =>
+    request(`/incidents/${id}/notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes }),
+    }),
   tokenIncidents: (tokenId: string) =>
     request<Incident[]>(`/tokens/${tokenId}/incidents`),
   listChannels: () => request<AlertChannel[]>("/alert-channels"),

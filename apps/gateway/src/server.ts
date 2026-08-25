@@ -13,12 +13,18 @@ const gatewayIp = process.env.F0_GATEWAY_IP ?? "127.0.0.1";
 const gatewayOrigin =
   process.env.F0_GATEWAY_ORIGIN ?? `http://${baseDomains[0]}:${process.env.F0_HTTP_PORT ?? 8080}`;
 const apiBaseUrl = process.env.F0_API_BASE_URL ?? "http://127.0.0.1:8443";
+const apiInternalSecret = process.env.F0_INTERNAL_SECRET;
 
 async function forwardIncident(body: unknown): Promise<void> {
   try {
     const res = await fetch(`${apiBaseUrl}/api/v1/incidents`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(apiInternalSecret
+          ? { authorization: `Bearer ${apiInternalSecret}` }
+          : {}),
+      },
       body: JSON.stringify(body),
     });
     // 404 = forwarded candidate isn't a live token id: expected, benign.
@@ -67,7 +73,7 @@ startHttpServer({
   port: httpPort,
   baseDomains,
   onEvent,
-  respond: artifactResponder({ gatewayOrigin, apiBaseUrl }),
+  respond: artifactResponder({ gatewayOrigin, apiBaseUrl, apiInternalSecret }),
 }).listen(httpPort, () => console.log(`gateway HTTP listening on :${httpPort}`));
 
 startDnsServer({

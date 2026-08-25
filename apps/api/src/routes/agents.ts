@@ -1,25 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/index.js";
 import { agents, agentSensors } from "../db/schema.js";
 import { newId } from "../ids.js";
-
-export function hashAgentKey(key: string): string {
-  return createHash("sha256").update(key).digest("hex");
-}
-
-/** Timing-safe compare of a bearer key against a stored hash. */
-export function verifyAgentKey(presented: string, storedHash: string): boolean {
-  const presentedHash = Buffer.from(hashAgentKey(presented), "hex");
-  const stored = Buffer.from(storedHash, "hex");
-  return (
-    presentedHash.length === stored.length &&
-    createHash("sha256").update(presented).digest() !== undefined &&
-    presentedHash.equals(stored)
-  );
-}
+import { hashAgentKey, verifyAgentKey } from "../auth.js";
 
 const SENSOR_CONFIG_SCHEMA = z.array(
   z.object({
@@ -30,7 +16,10 @@ const SENSOR_CONFIG_SCHEMA = z.array(
 );
 
 export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
-  app.post("/api/v1/agent/enroll", async (request, reply) => {
+  app.post(
+    "/api/v1/agent/enroll",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
     const parsed = z
       .object({
         enrollment_token: z.string().min(1),
@@ -81,7 +70,8 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       })
       .run();
     return reply.code(201).send({ agent_id: id, agent_key: rawKey });
-  });
+    },
+  );
 
   app.post("/api/v1/agent/heartbeat", async (request, reply) => {
     const auth = request.headers.authorization;

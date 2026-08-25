@@ -1,5 +1,15 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { api, type Incident, type TokenRow, type AlertChannel, type AgentRow } from "./api.js";
+import {
+  api,
+  getApiKey,
+  login,
+  setApiKey,
+  UnauthorizedError,
+  type Incident,
+  type TokenRow,
+  type AlertChannel,
+  type AgentRow,
+} from "./api.js";
 
 const TOKEN_TYPES = [
   { id: "web_bug", label: "Web Bug", hint: "1x1 pixel URL", fields: [], group: "Network" },
@@ -36,6 +46,7 @@ export default function App() {
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [needsAuth, setNeedsAuth] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -52,6 +63,10 @@ export default function App() {
       setLastUpdated(new Date());
       setFetchError(null);
     } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        setNeedsAuth(true);
+        return;
+      }
       setFetchError(err instanceof Error ? err.message : String(err));
     }
   }, []);
@@ -61,6 +76,18 @@ export default function App() {
     const timer = setInterval(() => void refresh(), 5_000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  if (needsAuth) {
+    return (
+      <LoginView
+        onSuccess={() => {
+          setNeedsAuth(false);
+          setFetchError(null);
+          void refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200">
@@ -104,6 +131,17 @@ export default function App() {
           >
             refresh
           </button>
+          {getApiKey() && (
+            <button
+              onClick={() => {
+                setApiKey("");
+                setNeedsAuth(true);
+              }}
+              className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1"
+            >
+              log out
+            </button>
+          )}
         </div>
       </header>
       <main className="p-6 max-w-6xl mx-auto">
@@ -119,6 +157,63 @@ export default function App() {
 
 function unacked(incidents: Incident[]): number {
   return incidents.filter((i) => !i.acknowledged).length;
+}
+
+function LoginView({ onSuccess }: { onSuccess: () => void }) {
+  const [key, setKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await login(key.trim());
+      setApiKey(key.trim());
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-200 flex items-center justify-center">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 space-y-4"
+      >
+        <h1 className="text-lg font-semibold tracking-tight">
+          f0<span className="text-amber-400">_</span>deception
+        </h1>
+        <p className="text-sm text-neutral-400">
+          This console requires an API key. Create one with{" "}
+          <code className="text-neutral-300">POST /api/v1/auth/keys</code> or
+          use the admin token (<code className="text-neutral-300">F0_ADMIN_TOKEN</code>).
+        </p>
+        <input
+          type="password"
+          autoFocus
+          placeholder="API key"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          className="w-full bg-neutral-800 border border-neutral-700 rounded-md px-3 py-2 text-sm"
+        />
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <button
+          type="submit"
+          disabled={busy || !key.trim()}
+          className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-medium rounded-md px-4 py-2 text-sm"
+        >
+          {busy ? "checking…" : "log in"}
+        </button>
+      </form>
+    </div>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -372,7 +467,7 @@ const SEVERITY_COLOR = {
 function incidentSummary(i: Incident): { label: string; detail: string; sourceIp: string } {
   const d = (i.event.detail ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string) : undefined);
-  const sourceIp = i.event.sourceIp ?? str("source_ip") ?? "unknown";
+  const sourceIp = i.sourceIp ?? i.event.sourceIp ?? str("source_ip") ?? "unknown";
 
   if (i.event.kind === "agent") {
     const sensor = str("sensor") ?? "agent";
@@ -415,6 +510,65 @@ function incidentSummary(i: Incident): { label: string; detail: string; sourceIp
   return { label: i.event.kind, detail: "", sourceIp };
 }
 
+/** Compact geo label for an incident row: "DE · Berlin" / "Germany" / "" */
+function geoLabel(i: Incident): string {
+  const g = i.geo;
+  if (!g) return "";
+  const place = [g.country, g.city].filter(Boolean).join(" · ");
+  return place || g.countryName || (g.org ? g.org : "");
+}
+
+function geoTitle(i: Incident): string {
+  const g = i.geo;
+  if (!g) return i.sourceIp ?? "";
+  return [
+    g.countryName ?? g.country,
+    g.city,
+    g.asn ? `AS${g.asn}` : undefined,
+    g.org,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function NotesEditor({
+  incident,
+  onSaved,
+}: {
+  incident: Incident;
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState(incident.notes ?? "");
+  const [busy, setBusy] = useState(false);
+  const dirty = value !== (incident.notes ?? "");
+  return (
+    <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="triage notes…"
+        rows={2}
+        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 placeholder:text-neutral-600"
+      />
+      {dirty && (
+        <button
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void api
+              .setIncidentNotes(incident.id, value.trim() === "" ? null : value)
+              .then(onSaved)
+              .finally(() => setBusy(false));
+          }}
+          className="border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1 text-xs text-neutral-300 disabled:opacity-50"
+        >
+          {busy ? "saving…" : "save notes"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChange: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
@@ -424,6 +578,7 @@ function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChang
       )}
       {incidents.map((i) => {
         const { label, detail, sourceIp } = incidentSummary(i);
+        const geo = geoLabel(i);
         const isOpen = expanded === i.id;
         return (
           <div
@@ -446,14 +601,23 @@ function IncidentsView({ incidents, onChange }: { incidents: Incident[]; onChang
               {detail && (
                 <div className="mt-0.5 text-xs text-neutral-500 truncate">{detail}</div>
               )}
+              {i.notes && !isOpen && (
+                <div className="mt-0.5 text-xs text-amber-400/70 truncate">📝 {i.notes}</div>
+              )}
               {isOpen && (
-                <pre className="mt-2 text-xs bg-neutral-950 border border-neutral-800 rounded p-3 overflow-x-auto text-neutral-400">
+                <>
+                  <pre className="mt-2 text-xs bg-neutral-950 border border-neutral-800 rounded p-3 overflow-x-auto text-neutral-400">
 {JSON.stringify(i.event, null, 2)}
-                </pre>
+                  </pre>
+                  <NotesEditor incident={i} onSaved={onChange} />
+                </>
               )}
             </div>
             <div className="flex items-center gap-4 shrink-0 text-xs text-neutral-400">
-              <span title={sourceIp}>{sourceIp}</span>
+              <span title={geoTitle(i)}>
+                {sourceIp}
+                {geo && <span className="text-neutral-500"> · {geo}</span>}
+              </span>
               <span>{new Date(i.seenAt).toLocaleString()}</span>
               {!i.acknowledged && (
                 <button

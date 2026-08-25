@@ -121,6 +121,8 @@ func (c *Client) ReportIncident(inc Incident) error {
 	if err != nil {
 		return err
 	}
+	req.Header.Set("authorization", "Bearer "+c.AgentKey)
+	req.Header.Set("x-agent-id", c.AgentID)
 	req.Header.Set("content-type", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {

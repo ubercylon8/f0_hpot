@@ -6,6 +6,8 @@ x-env: &shared-env
   F0_GATEWAY_IP: ${F0_GATEWAY_IP:-}
   F0_API_BASE_URL: http://api:8443
   F0_MAIL_DOMAINS: ${F0_MAIL_DOMAINS:-}
+  # Gateway→API shared secret (authorizes incident forwarding).
+  F0_INTERNAL_SECRET: ${F0_INTERNAL_SECRET:?set in .env}
 
 services:
   api:
@@ -19,6 +21,8 @@ services:
       F0_API_PORT: 8443
       F0_DB_PATH: /data/f0_deception.db
       F0_MAX_ALERTS_PER_MINUTE: ${F0_MAX_ALERTS_PER_MINUTE:-1}
+      F0_ADMIN_TOKEN: ${F0_ADMIN_TOKEN:?set in .env}
+      F0_ENROLLMENT_TOKEN: ${F0_ENROLLMENT_TOKEN:-}
     volumes:
       - api-data:/data
     expose:
