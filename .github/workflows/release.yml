@@ -35,15 +35,16 @@ jobs:
           echo "$RELEASE_ED25519_KEY" > release.key
           chmod 600 release.key
           ./sign_release.sh release.key bin/f0-deception-agent-*
+          # Raw 32-byte public key, base64 — consumed by the self-check below.
+          echo "F0_RELEASE_PUB_B64=$(openssl pkey -in release.key -pubout -outform DER | tail -c 32 | base64 -w0)" >> "$GITHUB_ENV"
           rm release.key
-          # Publish the public key fingerprint for verification
-          openssl pkey -in /dev/null -out /dev/null 2>/dev/null || true
 
       - name: Verify signature (self-check)
         working-directory: agent
         run: |
-          # Fail the release if the manifest doesn't verify against the pub key
-          echo "signature self-check skipped (pub key verification happens in-agent)"
+          # Fail the release if the signed manifest doesn't verify against
+          # the agent's own canonicalization + verifier.
+          go test ./internal/update/ -run TestOpensslSignedManifest -v
 
       - name: Package
         working-directory: agent

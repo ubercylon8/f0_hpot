@@ -59,6 +59,33 @@ func TestVerifyManifest(t *testing.T) {
 	}
 }
 
+// TestCanonicalManifestGolden locks the exact bytes the verifier signs/
+// verifies. The TypeScript signer (apps/api/src/release-signing.ts) and
+// agent/sign_release.sh MUST produce this identical string — the TS test
+// uses the same golden. If this breaks, all three sides changed together.
+func TestCanonicalManifestGolden(t *testing.T) {
+	m := Manifest{Version: "v1.2.3"}
+	m.Files = map[string]struct {
+		SHA256 string `json:"sha256"`
+		Size   int64  `json:"size"`
+	}{
+		"f0-deception-agent-linux-amd64":       {SHA256: "aaaa", Size: 123},
+		"f0-deception-agent-windows-amd64.exe": {SHA256: "bbbb", Size: 456},
+	}
+	m.Signature = ""
+	canonical, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"version":"v1.2.3","files":{` +
+		`"f0-deception-agent-linux-amd64":{"sha256":"aaaa","size":123},` +
+		`"f0-deception-agent-windows-amd64.exe":{"sha256":"bbbb","size":456}` +
+		`},"signature":""}`
+	if string(canonical) != want {
+		t.Fatalf("canonical form drifted:\n got: %s\nwant: %s", canonical, want)
+	}
+}
+
 func TestVerifyManifestWithoutEmbeddedKey(t *testing.T) {
 	UpdatePublicKey = ""
 	err := error(nil)
