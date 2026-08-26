@@ -1,1 +1,56 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * f0_hpot console theme — refined dark SOC, terminal-green accent.
+ * Tailwind v4 theme tokens; severity colors are shared app-wide.
+ */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-background: #060906; /* page — near-black with a green tint */
+  --color-surface: #0b100c; /* cards / panels */
+  --color-raised: #101713; /* inputs, hovers, raised elements */
+  --color-overlay: #162019; /* popovers, dropdowns, dialogs */
+  --color-border: #1c261f; /* hairlines */
+  --color-border-strong: #2c3a30;
+
+  --color-foreground: #dce8de; /* primary text */
+  --color-muted: #8fa598; /* secondary text */
+  --color-faint: #5f7268; /* placeholders, captions */
+
+  --color-accent: #3ef08a; /* terminal green */
+  --color-accent-hover: #6cf5a8;
+  --color-accent-dim: #12271a; /* accent wash backgrounds */
+  --color-accent-foreground: #03170b;
+
+  --color-danger: #f87171; /* high severity */
+  --color-danger-dim: #2b1214;
+  --color-warning: #fbbf24; /* medium severity */
+  --color-warning-dim: #2b2110;
+  --color-info: #38bdf8; /* low severity */
+  --color-info-dim: #0e1f2b;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  * {
+    border-color: var(--color-border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background-color: var(--color-accent-dim);
+    color: var(--color-accent);
+  }
+}

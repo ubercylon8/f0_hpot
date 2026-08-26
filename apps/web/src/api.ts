@@ -18,6 +18,19 @@ export class UnauthorizedError extends Error {
   }
 }
 
+let unauthorizedHandler: (() => void) | null = null;
+
+/** Registered once by the app shell: called whenever the API answers 401. */
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  unauthorizedHandler = fn;
+}
+
+/** Drop the stored key and bounce the app to the login gate. */
+export function logout(): void {
+  setApiKey("");
+  unauthorizedHandler?.();
+}
+
 export interface TokenArtifact {
   kind: "url" | "hostname" | "file_download";
   label: string;
@@ -75,6 +88,7 @@ export interface AgentRow {
   hostname: string;
   platform: string;
   version: string;
+  memo?: string | null;
   status: string;
   lastSeenAt: string | null;
   sensors: SensorRow[];
@@ -97,7 +111,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(key ? { authorization: `Bearer ${key}` } : {}),
     },
   });
-  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new UnauthorizedError();
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
