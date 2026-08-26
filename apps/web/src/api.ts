@@ -1,6 +1,9 @@
 const BASE = "/api/v1";
 const KEY_STORAGE = "f0_api_key";
 
+export type { DashboardStats } from "@f0/deception-shared";
+import type { DashboardStats } from "@f0/deception-shared";
+
 export function getApiKey(): string {
   return localStorage.getItem(KEY_STORAGE) ?? "";
 }
@@ -134,6 +137,7 @@ export async function login(key: string): Promise<void> {
 
 export const api = {
   listTokens: () => request<TokenRow[]>("/tokens"),
+  getStats: () => request<DashboardStats>("/stats"),
   createToken: (type: string, memo?: string, config: object = {}) =>
     request<TokenRow>("/tokens", {
       method: "POST",
