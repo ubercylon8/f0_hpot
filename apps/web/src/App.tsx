@@ -10,6 +10,7 @@ import { TokensPage } from "@/pages/tokens";
 import { IncidentsPage } from "@/pages/incidents";
 import { AgentsPage } from "@/pages/agents";
 import { ChannelsPage } from "@/pages/channels";
+import { SettingsPage } from "@/pages/settings";
 
 export default function App() {
   const [needsAuth, setNeedsAuth] = useState(false);
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="incidents" element={<IncidentsPage />} />
             <Route path="agents" element={<AgentsPage />} />
             <Route path="channels" element={<ChannelsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

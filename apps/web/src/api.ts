@@ -115,6 +115,21 @@ export interface AlertChannel {
   enabled: boolean;
   failureCount: number;
   createdAt: string;
+  config: Record<string, unknown>;
+}
+
+export interface AuthKeyRow {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface ServerStatus {
+  geoipEnabled: boolean;
+  authOpenMode: boolean;
+  enrollmentConfigured: boolean;
+  alertThrottlePerMinute: number;
 }
 
 export interface ReleaseKeyRow {
@@ -172,7 +187,17 @@ export const api = {
     }),
   uploadTokenImage: (id: string, image: { data: string; contentType: string; filename?: string }) =>
     request(`/tokens/${id}/image`, { method: "POST", body: JSON.stringify(image) }),
-  listIncidents: () => request<Incident[]>("/incidents"),
+  listIncidents: (params: Record<string, string | undefined> = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter((kv): kv is [string, string] => !!kv[1]),
+    ).toString();
+    return request<Incident[]>(`/incidents${qs ? `?${qs}` : ""}`);
+  },
+  bulkAckIncidents: (ids: string[]) =>
+    request<{ ok: boolean; updated: number }>("/incidents/bulk-ack", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   getIncident: (id: string) => request<Incident>(`/incidents/${id}`),
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
@@ -214,6 +239,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ kind, config }),
     }),
+  patchChannel: (id: string, enabled: boolean) =>
+    request(`/alert-channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+  testChannel: (id: string) =>
+    request(`/alert-channels/${id}/test`, { method: "POST" }),
   deleteChannel: (id: string) =>
     request(`/alert-channels/${id}`, { method: "DELETE" }),
+  getStatus: () => request<ServerStatus>("/status"),
+  listAuthKeys: () => request<AuthKeyRow[]>("/auth/keys"),
+  createAuthKey: (label: string) =>
+    request<{ id: string; key: string; label: string }>("/auth/keys", {
+      method: "POST",
+      body: JSON.stringify({ label }),
+    }),
+  deleteAuthKey: (id: string) => request(`/auth/keys/${id}`, { method: "DELETE" }),
 };

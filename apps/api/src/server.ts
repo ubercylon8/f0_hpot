@@ -8,6 +8,7 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerReleaseRoutes } from "./routes/releases.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerStatusRoutes } from "./routes/status.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
 import { buildAuthContext, isOpenMode, makeAuthHook } from "./auth.js";
 import { createGeoLookup } from "./geoip.js";
@@ -48,6 +49,10 @@ export function buildServer(opts: { dbPath?: string } = {}) {
   registerAgentRoutes(app, db);
   registerReleaseRoutes(app, db);
   registerStatsRoutes(app, db);
+  registerStatusRoutes(app, {
+    geoEnabled: geo.enabled,
+    isOpenMode: () => isOpenMode(db, authCtx),
+  });
 
   return { app, db };
 }

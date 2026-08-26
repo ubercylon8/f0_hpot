@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Bell, Crosshair, LayoutDashboard, LogOut, Server, Siren } from "lucide-react";
+import { Bell, Crosshair, LayoutDashboard, LogOut, Server, Settings, Siren } from "lucide-react";
 import { getApiKey, logout } from "../../api.js";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "../Wordmark.js";
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/incidents", label: "Incidents", icon: Siren, end: false },
   { to: "/agents", label: "Agents", icon: Server, end: false },
   { to: "/channels", label: "Alert Channels", icon: Bell, end: false },
+  { to: "/settings", label: "Settings", icon: Settings, end: false },
 ];
 
 export function AppShell() {

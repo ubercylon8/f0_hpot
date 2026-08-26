@@ -19,10 +19,12 @@ export interface GeoInfo {
 }
 
 export interface GeoLookup {
+  /** false when running without an .mmdb (null lookup). */
+  readonly enabled: boolean;
   lookup(ip: string): GeoInfo | null;
 }
 
-const NULL_LOOKUP: GeoLookup = { lookup: () => null };
+const NULL_LOOKUP: GeoLookup = { enabled: false, lookup: () => null };
 
 export function createGeoLookup(
   dbPath: string | undefined,
@@ -32,6 +34,7 @@ export function createGeoLookup(
   try {
     const reader = new Reader<CityResponse>(readFileSync(dbPath));
     return {
+      enabled: true,
       lookup(ip: string): GeoInfo | null {
         try {
           const r = reader.get(ip);

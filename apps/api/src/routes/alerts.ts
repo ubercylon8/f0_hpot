@@ -38,13 +38,30 @@ const channelConfigSchemas: Record<string, z.ZodType> = {
   }),
 };
 
+const SECRET_KEY_RE = /pass|secret|token|key/i;
+
+function maskSecrets(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).map(([k, v]) => [
+      k,
+      SECRET_KEY_RE.test(k) && typeof v === "string" && v !== "" ? "•••" : v,
+    ]),
+  );
+}
+
 export function registerAlertRoutes(
   app: FastifyInstance,
   db: Db,
   dispatcher: AlertDispatcher,
 ): void {
   app.get("/api/v1/alert-channels", async () => {
-    return db.select().from(alertChannels).orderBy(desc(alertChannels.createdAt)).all();
+    // Secrets are write-only: the console never needs them back.
+    return db
+      .select()
+      .from(alertChannels)
+      .orderBy(desc(alertChannels.createdAt))
+      .all()
+      .map((c) => ({ ...c, config: maskSecrets(c.config as Record<string, unknown>) }));
   });
 
   app.post("/api/v1/alert-channels", async (request, reply) => {
