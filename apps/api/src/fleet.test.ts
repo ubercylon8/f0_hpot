@@ -263,4 +263,26 @@ describe("fleet + dashboard API", () => {
       await app.close();
     }
   });
+
+  it("agent-bootstrap exposes the enrollment token to console operators", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/v1/agent-bootstrap" });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { enrollmentToken: string | null }).enrollmentToken).toBe(
+        "enroll-token",
+      );
+    } finally {
+      await app.close();
+    }
+    delete process.env.F0_ENROLLMENT_TOKEN;
+    const app2 = await makeServer();
+    try {
+      const res = await app2.inject({ method: "GET", url: "/api/v1/agent-bootstrap" });
+      expect((res.json() as { enrollmentToken: string | null }).enrollmentToken).toBeNull();
+    } finally {
+      await app2.close();
+    }
+  });
 });

@@ -117,6 +117,13 @@ export interface AlertChannel {
   createdAt: string;
 }
 
+export interface ReleaseKeyRow {
+  id: string;
+  label: string;
+  publicKey: string;
+  createdAt: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const key = getApiKey();
   const res = await fetch(`${BASE}${path}`, {
@@ -182,6 +189,21 @@ export const api = {
       "/agent-releases",
     ),
   listAgents: () => request<AgentRow[]>("/agents"),
+  getAgentBootstrap: () => request<{ enrollmentToken: string | null }>("/agent-bootstrap"),
+  patchAgent: (id: string, memo: string | null) =>
+    request(`/agents/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }),
+  deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),
+  listReleaseKeys: () => request<ReleaseKeyRow[]>("/release-keys"),
+  createReleaseKey: (label: string) =>
+    request<ReleaseKeyRow>("/release-keys", {
+      method: "POST",
+      body: JSON.stringify({ label }),
+    }),
+  signReleases: (keyId: string, version?: string) =>
+    request<{ ok: boolean; version: string; files: string[] }>("/agent-releases/sign", {
+      method: "POST",
+      body: JSON.stringify(version ? { keyId, version } : { keyId }),
+    }),
   setAgentSensors: (id: string, sensors: { kind: string; enabled: boolean; config: object }[]) =>
     request(`/agents/${id}/sensors`, {
       method: "PUT",

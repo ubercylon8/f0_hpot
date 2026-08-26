@@ -1,19 +1,222 @@
 import { useEffect, useState } from "react";
+import { KeyRound, Plus, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AgentRow } from "../api.js";
+import { api, type AgentRow, type ReleaseKeyRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
+import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CopyButton } from "@/components/CopyButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-const selectClass =
-  "h-8 rounded-md border border-border bg-raised px-2 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-accent";
+function OnlineDot({ agent }: { agent: AgentRow }) {
+  const online =
+    agent.status === "online" &&
+    agent.lastSeenAt !== null &&
+    Date.now() - new Date(agent.lastSeenAt).getTime() < 180_000;
+  return (
+    <span className={cn("flex items-center gap-1.5 text-xs", online ? "text-accent" : "text-danger")}>
+      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", online ? "bg-accent" : "bg-danger")} />
+      {online ? "online" : "offline"}
+    </span>
+  );
+}
 
-function ReleasesPanel() {
+function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) api.getAgentBootstrap().then((b) => setToken(b.enrollmentToken)).catch(() => {});
+  }, [open]);
+
+  const origin = window.location.origin;
+  const oneLiner = token
+    ? `curl -LO ${origin}/api/v1/agent-releases/f0-deception-agent-linux-amd64 && ` +
+      `chmod +x f0-deception-agent-linux-amd64 && ` +
+      `sudo ./f0-deception-agent-linux-amd64 --server ${origin} --enroll ${token} --install`
+    : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Terminal className="h-4 w-4 text-accent" /> Add an agent
+          </DialogTitle>
+          <DialogDescription>
+            Run this on the honeypot host (linux/amd64). Other platforms: download
+            the matching binary from the releases card and use the same flags.
+          </DialogDescription>
+        </DialogHeader>
+        {oneLiner ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-md border border-border bg-background p-3">
+              <code className="min-w-0 flex-1 break-all font-mono text-xs text-accent">
+                {oneLiner}
+              </code>
+              <CopyButton value={oneLiner} label="copy one-liner" />
+            </div>
+            <p className="text-xs text-faint">
+              The enrollment token authenticates the host once; the agent receives
+              its own key at enrollment. Re-running with the same hostname
+              re-keys the existing agent.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-warning">
+            F0_ENROLLMENT_TOKEN is not set on the API — agent enrollment is
+            disabled. Set it and restart the API.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SigningKeysCard() {
+  const [keys, setKeys] = useState<ReleaseKeyRow[] | null>(null);
+  const [label, setLabel] = useState("");
+  const [signKey, setSignKey] = useState("");
+  const [version, setVersion] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => api.listReleaseKeys().then(setKeys).catch(() => setKeys([]));
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  async function generate() {
+    setBusy(true);
+    try {
+      const k = await api.createReleaseKey(label.trim() || "release");
+      setLabel("");
+      toast.success(`key ${k.id} generated`, {
+        description: "Embed the public key in the agent build via -ldflags (copied to clipboard on click).",
+      });
+      await navigator.clipboard.writeText(k.publicKey).catch(() => {});
+      void reload();
+      setSignKey(k.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sign() {
+    setBusy(true);
+    try {
+      const r = await api.signReleases(signKey, version.trim() || undefined);
+      toast.success(`signed manifest ${r.version} covering ${r.files.length} file(s)`);
+      setVersion("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="h-4 w-4 text-accent" /> Release signing keys
+        </CardTitle>
+        <CardDescription>
+          Ed25519 keys stored server-side; the public half is embedded in the agent
+          binary to verify self-updates.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {(keys ?? []).map((k) => (
+          <div key={k.id} className="flex items-center gap-3 text-xs">
+            <Badge variant="outline">{k.label}</Badge>
+            <span className="font-mono text-faint">{k.id}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-muted">{k.publicKey}</span>
+            <CopyButton value={k.publicKey} label="copy embeddable public key" />
+            <span className="shrink-0 text-faint">{new Date(k.createdAt).toLocaleDateString()}</span>
+          </div>
+        ))}
+        {(keys ?? []).length === 0 && (
+          <p className="text-xs text-faint">No signing keys yet — generate one below.</p>
+        )}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Input
+            placeholder="key label (e.g. prod-2026)"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="h-8 w-52"
+          />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void generate()}>
+            generate key
+          </Button>
+        </div>
+        {(keys ?? []).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <Select value={signKey} onValueChange={setSignKey}>
+              <SelectTrigger className="h-8 w-52">
+                <SelectValue placeholder="sign with key…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(keys ?? []).map((k) => (
+                  <SelectItem key={k.id} value={k.id}>
+                    {k.label} ({k.id})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              placeholder="version (default: dev-<date>)"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              className="h-8 w-52"
+            />
+            <Button size="sm" disabled={busy || !signKey} onClick={() => void sign()}>
+              sign release dir
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReleasesCard() {
   const [files, setFiles] = useState<{ filename: string; size: number; url: string }[]>([]);
   const [manifest, setManifest] = useState<string | null>(null);
 
@@ -28,38 +231,32 @@ function ReleasesPanel() {
   }, []);
 
   return (
-    <Card className="space-y-2 p-5">
-      <h2 className="text-sm font-semibold">Agent downloads</h2>
-      {files.length === 0 ? (
-        <p className="text-xs text-faint">
-          No release binaries found. Build with{" "}
-          <code className="font-mono text-muted">cd agent && make release</code> and set{" "}
-          <code className="font-mono text-muted">F0_AGENT_RELEASE_DIR</code> on the API.
-        </p>
-      ) : (
-        <ul className="space-y-1">
-          {files.map((f) => (
-            <li key={f.filename} className="flex items-center justify-between text-sm">
+    <Card>
+      <CardHeader>
+        <CardTitle>Release binaries</CardTitle>
+        <CardDescription>
+          Built with <code className="font-mono text-muted">cd agent && make release</code>,
+          served from <code className="font-mono text-muted">F0_AGENT_RELEASE_DIR</code>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {files.length === 0 ? (
+          <p className="text-xs text-faint">No release binaries found.</p>
+        ) : (
+          files.map((f) => (
+            <div key={f.filename} className="flex items-center justify-between text-sm">
               <span className="font-mono text-xs">{f.filename}</span>
               <span className="flex items-center gap-3 text-xs text-muted">
                 {(f.size / 1e6).toFixed(1)} MB
                 <a href={f.url} download>
-                  <Button variant="outline" size="sm">
-                    download
-                  </Button>
+                  <Button variant="outline" size="sm">download</Button>
                 </a>
               </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {manifest && <p className="text-xs text-accent">✓ signed release manifest present</p>}
-      <p className="text-xs text-faint">
-        Install:{" "}
-        <code className="font-mono text-muted">
-          ./f0-deception-agent --server &lt;api-url&gt; --enroll &lt;token&gt; --install
-        </code>
-      </p>
+            </div>
+          ))
+        )}
+        {manifest && <p className="pt-1 text-xs text-accent">✓ signed release manifest present</p>}
+      </CardContent>
     </Card>
   );
 }
@@ -87,6 +284,9 @@ interface SensorRowState {
   label: string;
   token_id: string;
 }
+
+const selectClass =
+  "h-8 rounded-md border border-border bg-raised px-2 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-accent";
 
 function SensorEditor({
   agentId,
@@ -129,7 +329,7 @@ function SensorEditor({
           },
         })),
       );
-      toast.success("Sensor config deployed");
+      toast.success("Sensor config deployed — agent picks it up on next heartbeat");
       onDone();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -139,10 +339,10 @@ function SensorEditor({
   }
 
   return (
-    <Card className="space-y-2 bg-background p-4">
+    <div className="space-y-2 rounded-md border border-border bg-background p-3">
       {rows.map((r, i) => (
         <div key={i} className="flex flex-wrap items-center gap-2">
-          <select value={r.kind} onChange={(e) => update(i, { kind: e.target.value })} className={`${selectClass} w-44`}>
+          <select value={r.kind} onChange={(e) => update(i, { kind: e.target.value })} className={`${selectClass} w-40`}>
             {SENSOR_KINDS.map((k) => (
               <option key={k.id}>{k.id}</option>
             ))}
@@ -151,17 +351,16 @@ function SensorEditor({
             <Input placeholder="port" value={r.port} onChange={(e) => update(i, { port: e.target.value })} className="h-8 w-20" />
           )}
           {fieldsFor(r.kind).includes("path") && (
-            <Input placeholder="/absolute/path" value={r.path} onChange={(e) => update(i, { path: e.target.value })} className="h-8 min-w-40 flex-1" />
+            <Input placeholder="/absolute/path" value={r.path} onChange={(e) => update(i, { path: e.target.value })} className="h-8 min-w-36 flex-1" />
           )}
           {fieldsFor(r.kind).includes("label") && (
-            <Input placeholder="label" value={r.label} onChange={(e) => update(i, { label: e.target.value })} className="h-8 w-32" />
+            <Input placeholder="label" value={r.label} onChange={(e) => update(i, { label: e.target.value })} className="h-8 w-28" />
           )}
           {fieldsFor(r.kind).includes("token_id") && (
-            <Input placeholder="token id" value={r.token_id} onChange={(e) => update(i, { token_id: e.target.value })} className="h-8 w-36" />
+            <Input placeholder="token id" value={r.token_id} onChange={(e) => update(i, { token_id: e.target.value })} className="h-8 w-32" />
           )}
           <div className="flex items-center gap-1.5">
             <Switch checked={r.enabled} onCheckedChange={(v) => update(i, { enabled: v })} />
-            <span className="text-xs text-muted">enabled</span>
           </div>
           <Button variant="ghost" size="sm" className="text-danger hover:text-danger" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
             remove
@@ -180,82 +379,237 @@ function SensorEditor({
           {busy ? "deploying…" : "save & deploy"}
         </Button>
       </div>
-    </Card>
+    </div>
+  );
+}
+
+function AgentDrawer({
+  agent,
+  onClose,
+  onChanged,
+}: {
+  agent: AgentRow | null;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [memo, setMemo] = useState("");
+  const [editingSensors, setEditingSensors] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setMemo(agent?.memo ?? "");
+    setEditingSensors(false);
+    setConfirming(false);
+  }, [agent]);
+
+  async function act(fn: () => Promise<unknown>, done: string) {
+    setBusy(true);
+    try {
+      await fn();
+      toast.success(done);
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={agent !== null} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent>
+        {agent && (
+          <>
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-3">
+                {agent.hostname}
+                <OnlineDot agent={agent} />
+              </SheetTitle>
+              <SheetDescription className="font-mono text-xs">
+                {agent.id} · {agent.platform} · v{agent.version} · last seen{" "}
+                {agent.lastSeenAt ? timeAgo(agent.lastSeenAt) : "never"}
+              </SheetDescription>
+            </SheetHeader>
+            <SheetBody className="space-y-5">
+              <div className="space-y-1.5">
+                <Label>Memo</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="e.g. dmz honeypot, rack 3"
+                    value={memo}
+                    onChange={(e) => setMemo(e.target.value)}
+                    className="h-8"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || memo === (agent.memo ?? "")}
+                    onClick={() => void act(() => api.patchAgent(agent.id, memo.trim() || null), "memo saved")}
+                  >
+                    save
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Sensors</h3>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditingSensors(!editingSensors)}
+                  >
+                    {editingSensors ? "close editor" : "edit sensors"}
+                  </Button>
+                </div>
+                {agent.sensors.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2.5 text-sm">
+                    <Badge variant={s.enabled ? "accent" : "default"} className="font-mono">
+                      {s.kind}
+                    </Badge>
+                    <span className="truncate font-mono text-xs text-faint">
+                      {JSON.stringify(s.config)}
+                    </span>
+                  </div>
+                ))}
+                {agent.sensors.length === 0 && (
+                  <p className="text-xs text-faint">No sensors configured.</p>
+                )}
+                {editingSensors && (
+                  <SensorEditor
+                    agentId={agent.id}
+                    initial={agent.sensors}
+                    onDone={() => {
+                      setEditingSensors(false);
+                      onChanged();
+                    }}
+                  />
+                )}
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Danger zone</h3>
+                {confirming ? (
+                  <div className="space-y-3 rounded-md border border-danger/30 bg-danger-dim p-3">
+                    <p className="text-xs text-foreground">
+                      Retire <strong>{agent.hostname}</strong>? Its key stops working
+                      immediately (heartbeats and incident reports will be rejected).
+                      Past incidents are kept.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(async () => {
+                            await api.deleteAgent(agent.id);
+                            onClose();
+                          }, "agent retired")
+                        }
+                      >
+                        {busy ? "retiring…" : "retire agent"}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setConfirming(false)}>
+                        cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-danger hover:text-danger"
+                    onClick={() => setConfirming(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    retire agent…
+                  </Button>
+                )}
+              </div>
+            </SheetBody>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
 
 export function AgentsPage() {
   const { data: agents, error, reload } = usePoll<AgentRow[]>(() => api.listAgents());
-  const [editing, setEditing] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [selected, setSelected] = useState<AgentRow | null>(null);
   const list = agents ?? [];
 
   return (
     <section className="space-y-4">
-      <PageHeader title="Agents" description="Honeypot fleet and sensor configuration" />
+      <PageHeader title="Agents" description="Honeypot fleet, sensors, and releases">
+        <Button onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add agent
+        </Button>
+      </PageHeader>
       {error && <p className="text-sm text-danger">{error}</p>}
-      <ReleasesPanel />
-      {list.length === 0 && (
-        <p className="text-sm text-faint">
-          No agents enrolled. Run the agent with{" "}
-          <code className="font-mono text-muted">--server &lt;api-url&gt; --enroll &lt;token&gt;</code>.
-        </p>
-      )}
-      {list.map((a) => {
-        const online =
-          a.status === "online" &&
-          a.lastSeenAt !== null &&
-          Date.now() - new Date(a.lastSeenAt).getTime() < 180_000;
-        return (
-          <Card key={a.id} className="space-y-3 p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="font-medium">{a.hostname}</span>
-                <span className={cn("flex items-center gap-1.5 text-xs", online ? "text-accent" : "text-danger")}>
-                  <span className={cn("inline-block h-1.5 w-1.5 rounded-full", online ? "bg-accent" : "bg-danger")} />
-                  {online ? "online" : "offline"}
-                </span>
-                {a.memo && <span className="text-xs text-faint">{a.memo}</span>}
-              </div>
-              <span className="text-xs text-muted">
-                {a.platform} · v{a.version} · last seen{" "}
-                {a.lastSeenAt ? new Date(a.lastSeenAt).toLocaleString() : "never"}
-              </span>
-            </div>
 
-            <div className="space-y-1">
-              {a.sensors.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 text-sm text-foreground">
-                  <Badge variant={s.enabled ? "accent" : "default"} className="font-mono">
-                    {s.kind}
-                  </Badge>
-                  <span className="font-mono text-xs text-faint">{JSON.stringify(s.config)}</span>
-                </div>
-              ))}
-              {a.sensors.length === 0 && <p className="text-xs text-faint">No sensors configured.</p>}
-            </div>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Hostname</TableHead>
+              <TableHead>Memo</TableHead>
+              <TableHead>Platform</TableHead>
+              <TableHead>Sensors</TableHead>
+              <TableHead>Last seen</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.map((a) => (
+              <TableRow key={a.id} className="cursor-pointer" onClick={() => setSelected(a)}>
+                <TableCell className="font-medium">{a.hostname}</TableCell>
+                <TableCell className="max-w-40 truncate text-muted">{a.memo ?? "—"}</TableCell>
+                <TableCell className="text-muted">
+                  {a.platform} · v{a.version}
+                </TableCell>
+                <TableCell>
+                  <span className="flex flex-wrap gap-1">
+                    {a.sensors.length === 0 && <span className="text-faint">—</span>}
+                    {a.sensors.map((s) => (
+                      <Badge key={s.id} variant={s.enabled ? "outline" : "default"} className="font-mono text-[10px]">
+                        {s.kind}
+                      </Badge>
+                    ))}
+                  </span>
+                </TableCell>
+                <TableCell className="text-muted">
+                  {a.lastSeenAt ? timeAgo(a.lastSeenAt) : "never"}
+                </TableCell>
+                <TableCell>
+                  <OnlineDot agent={a} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {list.length === 0 && (
+          <p className="p-5 text-sm text-faint">
+            No agents enrolled — use Add agent to get an install one-liner.
+          </p>
+        )}
+      </Card>
 
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setEditing(editing === a.id ? null : a.id)}
-              >
-                {editing === a.id ? "close editor" : "edit sensors"}
-              </Button>
-            </div>
-            {editing === a.id && (
-              <SensorEditor
-                agentId={a.id}
-                initial={a.sensors}
-                onDone={() => {
-                  setEditing(null);
-                  void reload();
-                }}
-              />
-            )}
-          </Card>
-        );
-      })}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ReleasesCard />
+        <SigningKeysCard />
+      </div>
+
+      <AddAgentDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AgentDrawer agent={selected} onClose={() => setSelected(null)} onChanged={() => void reload()} />
     </section>
   );
 }

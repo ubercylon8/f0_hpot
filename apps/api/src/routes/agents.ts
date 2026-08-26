@@ -108,6 +108,13 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     });
   });
 
+  // Console-scope: what the "add agent" flow needs to render a one-liner.
+  // The enrollment token is a bootstrap secret shared with console
+  // operators — they can already mint agent keys by definition.
+  app.get("/api/v1/agent-bootstrap", async () => {
+    return { enrollmentToken: process.env.F0_ENROLLMENT_TOKEN ?? null };
+  });
+
   app.get("/api/v1/agents", async () => {
     const rows = db
       .select({
