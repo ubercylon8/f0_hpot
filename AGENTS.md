@@ -86,5 +86,6 @@ F0_API_BASE_URL=http://127.0.0.1:18443 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 npx 
 - P6 ✅ PDF/cloned-site tokens, SMB (NTLM capture) + RDP (CredSSP/NLA)
   honeypots, Elastic/Loki channels, AWS/Azure decoys, Ed25519 signed
   self-updates, CI (build/test/semgrep/gitleaks)
-- P7 🚧 web console overhaul → f0_hpot (Phase A API gap-fill done —
-  stats/fleet/incident-filter endpoints; see `docs/HANDOFF.md` §3.9)
+- P7 ✅ web console overhaul → f0_hpot (A–G: stats/fleet APIs, dark-SOC
+  design system, dashboard, tokens/agents/channels/settings UX; see
+  `docs/HANDOFF.md` §3.9)

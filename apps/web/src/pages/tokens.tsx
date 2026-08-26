@@ -563,6 +563,7 @@ export function TokensPage() {
         <div className="relative min-w-64 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
           <Input
+            id="page-search"
             placeholder="search id, type, or memo…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

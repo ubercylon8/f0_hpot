@@ -20,16 +20,33 @@ be revoked/alerted centrally.
 
 ## 2. Console tour
 
-Open `http://<console-host>`:
+Open `http://<console-host>` and log in with an API key (create one with
+`POST /api/v1/auth/keys` or use `F0_ADMIN_TOKEN`). The console has a
+sidebar with six pages; press `?` anywhere for keyboard shortcuts
+(`1–6` jump between pages, `/` focuses the search box).
 
-- **Dashboard** – active tokens, 24h incidents, unacknowledged count
-- **Tokens** – create wizard (pick type → optional memo/config → Create).
-  Each token shows its artifacts: URLs to plant, hostnames, or files to download.
-- **Incidents** – live feed; click **ack** after triage. Severity colors:
-  red = high (document opened, credential captured), yellow = medium.
-- **Agents** – fleet status; "edit sensors" opens per-agent config editor
-  (kind, port/path/label, token id, on/off) with *save & deploy*.
-- **Alert Channels** – webhook / syslog / Elasticsearch / Loki destinations.
+- **Dashboard** – posture at a glance: unacknowledged/24h/7d counters,
+  active tokens, agents online, 30-day incident timeline, severity mix,
+  incidents by token type, top source IPs and countries, token
+  leaderboard, and a live recent-incidents feed.
+- **Tokens** – searchable/filterable table. **New token** opens a dialog
+  (type picker + per-type config) that hands you the artifacts to plant.
+  Click any row for the detail drawer: artifacts (copy/download),
+  custom-image upload, pause/resume/revoke/delete, incident history.
+- **Incidents** – filter by severity, token type, ack state, or free-text
+  search over the raw event. Select multiple unacknowledged incidents and
+  **ack selected** in one shot; click a row for the raw event JSON and
+  triage notes. Severity colors: red = high, amber = medium, blue = low.
+- **Agents** – fleet table (status, sensors, last seen). **Add agent**
+  gives a copy-paste install one-liner. Click a row for the drawer: memo,
+  sensor editor (*save & deploy* lands on the next heartbeat), retire.
+  Release binaries and Ed25519 signing keys live here too.
+- **Alert Channels** – webhook / email / syslog / Elasticsearch / Loki.
+  Every channel has a **test** button and an enable switch (disabling
+  resets the failure counter); failing channels show a failure badge.
+- **Settings** – API keys (create → shown once, revoke), server status
+  (GeoIP, enrollment, throttle), and an open-mode warning when the API
+  is running unauthenticated.
 
 ## 3. Token playbook
 

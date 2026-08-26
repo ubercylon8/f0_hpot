@@ -131,6 +131,7 @@ export function IncidentsPage() {
         <div className="relative min-w-56 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
           <Input
+            id="page-search"
             placeholder="search raw event (path, UA, DNS name)…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
