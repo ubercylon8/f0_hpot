@@ -66,12 +66,52 @@ interface CachedPage {
 
 /**
  * Serves token artifacts for matched requests. Mirrors the trigger rules in
- * tokens-core: `/tok/pixel.gif`, `/tok/r` (redirect), `/tok/qr`, `/tok/cmd/:name`,
- * `/tok/sqli`, `/tok/site` (cloned page).
+ * tokens-core: `/tok/pixel.gif`, `/tok/image` (custom image), `/tok/r`
+ * (redirect), `/tok/qr`, `/tok/cmd/:name`, `/tok/sqli`, `/tok/site`
+ * (cloned page).
  */
 export function artifactResponder(opts: ArtifactResponderOptions) {
   const configCache = new Map<string, CachedConfig>();
   const pageCache = new Map<string, CachedPage>();
+
+  /** Fetch a stored file from the API and serve it (with a short cache). */
+  async function serveApiFile(
+    res: http.ServerResponse,
+    cacheKey: string,
+    url: string,
+  ): Promise<boolean> {
+    const cached = pageCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.writeHead(200, {
+        "content-type": cached.contentType,
+        "cache-control": "no-store",
+      });
+      res.end(cached.body);
+      return true;
+    }
+    try {
+      const pres = await fetch(url, {
+        signal: AbortSignal.timeout(5000),
+        headers: apiHeaders(opts.apiInternalSecret),
+      });
+      if (!pres.ok) return false;
+      const body = Buffer.from(await pres.arrayBuffer());
+      const entry: CachedPage = {
+        body,
+        contentType: pres.headers.get("content-type") ?? "application/octet-stream",
+        expiresAt: Date.now() + CONFIG_TTL_MS,
+      };
+      pageCache.set(cacheKey, entry);
+      res.writeHead(200, {
+        "content-type": entry.contentType,
+        "cache-control": "no-store",
+      });
+      res.end(body);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async function lookupToken(
     tokenId: string,
@@ -161,41 +201,20 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
 
     if (action === "site") {
       // Cloned page served from API storage; beacon inside triggers the hit.
-      const cached = pageCache.get(tokenId);
-      if (cached && cached.expiresAt > Date.now()) {
-        res.writeHead(200, {
-          "content-type": cached.contentType,
-          "cache-control": "no-store",
-        });
-        res.end(cached.body);
-        return true;
-      }
-      try {
-        const pres = await fetch(
-          `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-page`,
-          {
-            signal: AbortSignal.timeout(5000),
-            headers: apiHeaders(opts.apiInternalSecret),
-          },
-        );
-        if (pres.ok) {
-          const body = Buffer.from(await pres.arrayBuffer());
-          pageCache.set(tokenId, {
-            body,
-            contentType: pres.headers.get("content-type") ?? "text/html",
-            expiresAt: Date.now() + CONFIG_TTL_MS,
-          });
-          res.writeHead(200, {
-            "content-type": pageCache.get(tokenId)!.contentType,
-            "cache-control": "no-store",
-          });
-          res.end(body);
-          return true;
-        }
-      } catch {
-        /* fall through to 404 */
-      }
-      return false;
+      return serveApiFile(
+        res,
+        `site:${tokenId}`,
+        `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-page`,
+      );
+    }
+
+    if (action === "image") {
+      // Operator-uploaded custom image, served from API storage.
+      return serveApiFile(
+        res,
+        `img:${tokenId}`,
+        `${opts.apiBaseUrl}/api/v1/tokens/${encodeURIComponent(tokenId)}/internal-image`,
+      );
     }
 
     if (action === "azure") {

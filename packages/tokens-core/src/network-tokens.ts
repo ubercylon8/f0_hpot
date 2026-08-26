@@ -47,6 +47,25 @@ export const webBugToken: TokenTypeDefinition = {
   },
 };
 
+export const customImageToken: TokenTypeDefinition = {
+  id: "custom_image",
+  label: "Custom Image",
+  description:
+    "A unique URL serving an operator-uploaded image (POST the image to /api/v1/tokens/:id/image after creation). Any fetch of the URL triggers an alert.",
+  group: "network",
+  configSchema: emptyConfig,
+  generate(ctx) {
+    const url = `${ctx.gatewayOrigin}/${ctx.tokenId}/image`;
+    return [{ kind: "url", label: "Custom image URL", value: url }];
+  },
+  matchTrigger(event, tokenId) {
+    const http = httpOf(event);
+    if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
+    if (!http.path.startsWith(`/${tokenId}/image`)) return { matched: false };
+    return { matched: true, severity: "medium" };
+  },
+};
+
 export const dnsToken: TokenTypeDefinition = {
   id: "dns",
   label: "DNS Token",

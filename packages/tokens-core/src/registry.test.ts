@@ -34,6 +34,29 @@ describe("registry", () => {
     expect(def.matchTrigger(httpEvent(), "tok123").matched).toBe(false);
   });
 
+  it("custom_image matches /image path fetch", () => {
+    const def = getTokenType("custom_image")!;
+    const ev = httpEvent({
+      http: { method: "GET", host: "tok123.tokens.example.com", path: "/tok123/image" },
+    });
+    const match = def.matchTrigger(ev, "tok123");
+    expect(match.matched).toBe(true);
+    if (match.matched) expect(match.severity).toBe("medium");
+  });
+
+  it("custom_image and web_bug do not match each other's paths", () => {
+    const customImage = getTokenType("custom_image")!;
+    const webBug = getTokenType("web_bug")!;
+    const pixel = httpEvent({
+      http: { method: "GET", host: "tok123.tokens.example.com", path: "/tok123/pixel.gif" },
+    });
+    const image = httpEvent({
+      http: { method: "GET", host: "tok123.tokens.example.com", path: "/tok123/image" },
+    });
+    expect(customImage.matchTrigger(pixel, "tok123").matched).toBe(false);
+    expect(webBug.matchTrigger(image, "tok123").matched).toBe(false);
+  });
+
   it("dns token matches dns queries", () => {
     const def = getTokenType("dns")!;
     const ev = httpEvent({

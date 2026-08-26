@@ -13,6 +13,7 @@ import {
 
 const TOKEN_TYPES = [
   { id: "web_bug", label: "Web Bug", hint: "1x1 pixel URL", fields: [], group: "Network" },
+  { id: "custom_image", label: "Custom Image", hint: "operator-uploaded image URL", fields: [], group: "Network" },
   { id: "dns", label: "DNS Token", hint: "unique hostname", fields: [], group: "Network" },
   { id: "email", label: "Unique Email", hint: "trigger address (needs MX)", fields: [], group: "Network" },
   { id: "qr_code", label: "QR Code", hint: "scan-to-trigger", fields: [], group: "Documents" },

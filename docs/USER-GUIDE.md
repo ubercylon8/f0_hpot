@@ -37,6 +37,19 @@ Open `http://<console-host>`:
 Create `web_bug` → copy the pixel URL into emails, wikis, bookmark pages,
 HTML documents. Fires when anything fetches it.
 
+### Custom image
+Create `custom_image`, then upload your own image (logo, document
+screenshot, bait picture) — max 4 MiB, common raster formats (no svg):
+
+```sh
+curl -X POST $CONSOLE/api/v1/tokens/<id>/image \
+  -H 'content-type: application/json' \
+  -d "{\"data\":\"$(base64 -w0 bait.png)\",\"contentType\":\"image/png\",\"filename\":\"bait.png\"}"
+```
+
+Plant the `/<id>/image` URL like a web bug; the gateway serves your image
+and any fetch fires a medium alert. Re-upload replaces the image.
+
 ### DNS token
 Create `dns` → you get `<id>.tokens.example.com`. Any lookup of it or its
 subdomains alerts. Plant in: `hosts` files, documentation, tool configs.

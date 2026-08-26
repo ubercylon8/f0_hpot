@@ -34,7 +34,7 @@ const OPEN_ROUTES: { method: string; path: RegExp }[] = [
 const INTERNAL_ROUTES: { method: string; path: RegExp }[] = [
   // Gateway incident forwarding + artifact lookups.
   { method: "POST", path: /^\/api\/v1\/incidents$/ },
-  { method: "GET", path: /^\/api\/v1\/tokens\/[^/]+\/internal-(config|page)$/ },
+  { method: "GET", path: /^\/api\/v1\/tokens\/[^/]+\/internal-(config|page|image)$/ },
 ];
 
 export function hashApiKey(key: string): string {

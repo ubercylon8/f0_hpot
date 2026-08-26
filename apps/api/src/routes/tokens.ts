@@ -14,6 +14,17 @@ import type { AlertDispatcher } from "../alerts/dispatcher.js";
 import type { TriggerEvent } from "@f0/deception-shared";
 import { extractSourceIp, type GeoLookup } from "../geoip.js";
 
+// Whitelist for custom_image uploads (no svg: script-bearing markup).
+const IMAGE_CONTENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  "image/x-icon",
+]);
+
 export function registerTokenRoutes(
   app: FastifyInstance,
   db: Db,
@@ -190,6 +201,64 @@ export function registerTokenRoutes(
     return reply.send(Buffer.from(row.data, "base64"));
   });
 
+  app.post(
+    "/api/v1/tokens/:id/image",
+    // Roomy body cap: 4 MiB image + base64 overhead + envelope.
+    { bodyLimit: 6 * 1024 * 1024 },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const parsed = z
+        .object({
+          data: z.string().min(1),
+          contentType: z.string().min(3).max(100),
+          filename: z.string().min(1).max(200).optional(),
+        })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+      }
+      const token = db
+        .select({ type: tokens.type })
+        .from(tokens)
+        .where(eq(tokens.id, id))
+        .get();
+      if (!token) return reply.notFound("token not found");
+      if (token.type !== "custom_image") {
+        return reply.badRequest("token is not a custom_image token");
+      }
+      // svg deliberately excluded: no script-bearing markup served inline.
+      if (!IMAGE_CONTENT_TYPES.has(parsed.data.contentType)) {
+        return reply.badRequest(
+          `contentType must be one of: ${[...IMAGE_CONTENT_TYPES].join(", ")}`,
+        );
+      }
+      const b64 = parsed.data.data.replace(/\s/g, "");
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+        return reply.badRequest("data must be base64");
+      }
+      const body = Buffer.from(b64, "base64");
+      if (body.length === 0 || body.length > 4 * 1024 * 1024) {
+        return reply.badRequest("image must decode to 1 byte - 4 MiB");
+      }
+      const filename = (parsed.data.filename ?? "image").replace(/["\\/:]/g, "_");
+      db.delete(tokenFiles)
+        .where(and(eq(tokenFiles.tokenId, id), eq(tokenFiles.idx, 0)))
+        .run();
+      db.insert(tokenFiles)
+        .values({
+          id: newId("file"),
+          tokenId: id,
+          idx: 0,
+          filename,
+          contentType: parsed.data.contentType,
+          data: b64,
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+      return reply.send({ ok: true, size: body.length });
+    },
+  );
+
   // Internal: gateway artifact rendering needs the token type + config.
   app.get("/api/v1/incidents", async (request) => {
     const query = request.query as {
@@ -297,6 +366,27 @@ export function registerTokenRoutes(
       .where(eq(tokens.id, id))
       .get();
     if (!token || token.status !== "active" || token.type !== "cloned_website") {
+      return reply.notFound();
+    }
+    const file = db
+      .select()
+      .from(tokenFiles)
+      .where(and(eq(tokenFiles.tokenId, id), eq(tokenFiles.idx, 0)))
+      .get();
+    if (!file) return reply.notFound();
+    reply.header("content-type", file.contentType);
+    return reply.send(Buffer.from(file.data, "base64"));
+  });
+
+  // Internal: gateway serves custom_image uploads from here.
+  app.get("/api/v1/tokens/:id/internal-image", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const token = db
+      .select({ type: tokens.type, status: tokens.status })
+      .from(tokens)
+      .where(eq(tokens.id, id))
+      .get();
+    if (!token || token.status !== "active" || token.type !== "custom_image") {
       return reply.notFound();
     }
     const file = db

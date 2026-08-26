@@ -1,6 +1,7 @@
 import type { TokenType } from "@f0/deception-shared";
 import {
   webBugToken,
+  customImageToken,
   dnsToken,
   fastRedirectToken,
   qrCodeToken,
@@ -26,6 +27,7 @@ export type {
 
 const definitions: TokenTypeDefinition[] = [
   webBugToken,
+  customImageToken,
   dnsToken,
   fastRedirectToken,
   qrCodeToken,

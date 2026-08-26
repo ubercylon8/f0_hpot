@@ -54,6 +54,7 @@ s.tool(
   {
     type: z.enum([
       "web_bug",
+      "custom_image",
       "dns",
       "qr_code",
       "email",
