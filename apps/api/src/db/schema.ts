@@ -49,6 +49,7 @@ export const agents = sqliteTable("agents", {
   hostname: text("hostname").notNull(),
   platform: text("platform").notNull().default("unknown"),
   version: text("version").notNull().default("0.0.0"),
+  memo: text("memo"),
   status: text("status").notNull().default("online"),
   lastSeenAt: text("last_seen_at"),
   createdAt: text("created_at")

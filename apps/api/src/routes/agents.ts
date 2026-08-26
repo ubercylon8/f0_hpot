@@ -115,6 +115,7 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
         hostname: agents.hostname,
         platform: agents.platform,
         version: agents.version,
+        memo: agents.memo,
         status: agents.status,
         lastSeenAt: agents.lastSeenAt,
       })
@@ -128,6 +129,38 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
         .where(eq(agentSensors.agentId, a.id))
         .all(),
     }));
+  });
+
+  // Update operator-facing metadata (memo/alias).
+  app.patch("/api/v1/agents/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({ memo: z.string().max(500).nullable() })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const result = db
+      .update(agents)
+      .set({ memo: parsed.data.memo })
+      .where(eq(agents.id, id))
+      .run();
+    if (result.changes === 0) return reply.notFound("agent not found");
+    return reply.send({ ok: true });
+  });
+
+  // Retire an agent: its key dies with the row (heartbeats/reporting start
+  // returning 401). Incident history lives against tokens, not agents.
+  app.delete("/api/v1/agents/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!db.select({ id: agents.id }).from(agents).where(eq(agents.id, id)).get()) {
+      return reply.notFound("agent not found");
+    }
+    db.transaction((tx) => {
+      tx.delete(agentSensors).where(eq(agentSensors.agentId, id)).run();
+      tx.delete(agents).where(eq(agents.id, id)).run();
+    });
+    return reply.send({ ok: true });
   });
 
   // Replace the sensor set for an agent.

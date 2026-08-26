@@ -1,4 +1,4 @@
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, like, inArray, type SQL } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -162,6 +162,20 @@ export function registerTokenRoutes(
 
   app.delete("/api/v1/tokens/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
+    // ?hard=true deletes the token, its files, and its incident history;
+    // the default is a soft revoke (history preserved, triggering stops).
+    const { hard } = request.query as { hard?: string };
+    if (hard === "true") {
+      if (!db.select({ id: tokens.id }).from(tokens).where(eq(tokens.id, id)).get()) {
+        return reply.notFound("token not found");
+      }
+      db.transaction((tx) => {
+        tx.delete(incidents).where(eq(incidents.tokenId, id)).run();
+        tx.delete(tokenFiles).where(eq(tokenFiles.tokenId, id)).run();
+        tx.delete(tokens).where(eq(tokens.id, id)).run();
+      });
+      return reply.send({ ok: true, deleted: "hard" });
+    }
     const result = db
       .update(tokens)
       .set({ status: "revoked" })
@@ -259,14 +273,35 @@ export function registerTokenRoutes(
     },
   );
 
-  // Internal: gateway artifact rendering needs the token type + config.
-  app.get("/api/v1/incidents", async (request) => {
-    const query = request.query as {
-      limit?: string;
-      acknowledged?: string;
-      source_ip?: string;
-    };
-    const limit = Math.min(Number(query.limit ?? 200) || 200, 500);
+  app.get("/api/v1/incidents", async (request, reply) => {
+    const parsed = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(500).default(200),
+        acknowledged: z.enum(["true", "false"]).optional(),
+        source_ip: z.string().max(100).optional(),
+        severity: incidentSeveritySchema.optional(),
+        type: z.string().max(64).optional(),
+        token_id: z.string().max(64).optional(),
+        // Substring match against the raw event JSON (path, UA, DNS name...).
+        q: z.string().max(200).optional(),
+      })
+      .safeParse(request.query);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const query = parsed.data;
+    const conditions: SQL[] = [];
+    if (query.acknowledged === "false") {
+      conditions.push(eq(incidents.acknowledged, false));
+    }
+    if (query.acknowledged === "true") {
+      conditions.push(eq(incidents.acknowledged, true));
+    }
+    if (query.source_ip) conditions.push(eq(incidents.sourceIp, query.source_ip));
+    if (query.severity) conditions.push(eq(incidents.severity, query.severity));
+    if (query.type) conditions.push(eq(tokens.type, query.type));
+    if (query.token_id) conditions.push(eq(incidents.tokenId, query.token_id));
+    if (query.q) conditions.push(like(incidents.event, `%${query.q}%`));
     let stmt = db
       .select({
         id: incidents.id,
@@ -283,13 +318,10 @@ export function registerTokenRoutes(
       .from(incidents)
       .innerJoin(tokens, eq(incidents.tokenId, tokens.id))
       .orderBy(desc(incidents.seenAt))
-      .limit(limit)
+      .limit(query.limit)
       .$dynamic();
-    if (query.acknowledged === "false") {
-      stmt = stmt.where(eq(incidents.acknowledged, false));
-    }
-    if (query.source_ip) {
-      stmt = stmt.where(eq(incidents.sourceIp, query.source_ip));
+    if (conditions.length > 0) {
+      stmt = stmt.where(and(...conditions));
     }
     return stmt.all();
   });
@@ -344,6 +376,22 @@ export function registerTokenRoutes(
       .run();
     if (result.changes === 0) return reply.notFound("incident not found");
     return reply.send({ ok: true });
+  });
+
+  // Bulk triage: acknowledge up to 500 incidents in one call.
+  app.post("/api/v1/incidents/bulk-ack", async (request, reply) => {
+    const parsed = z
+      .object({ ids: z.array(z.string().min(1)).min(1).max(500) })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const result = db
+      .update(incidents)
+      .set({ acknowledged: true })
+      .where(inArray(incidents.id, parsed.data.ids))
+      .run();
+    return reply.send({ ok: true, updated: result.changes });
   });
 
   app.get("/api/v1/tokens/:id/internal-config", async (request, reply) => {

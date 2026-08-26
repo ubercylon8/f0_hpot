@@ -98,6 +98,7 @@ export function migrate(db: Db): void {
   addColumnIfMissing(client, "incidents", "source_ip", "source_ip TEXT");
   addColumnIfMissing(client, "incidents", "geo", "geo TEXT");
   addColumnIfMissing(client, "api_keys", "last_used_at", "last_used_at TEXT");
+  addColumnIfMissing(client, "agents", "memo", "memo TEXT");
   client.exec(
     "CREATE INDEX IF NOT EXISTS incidents_source_ip_idx ON incidents (source_ip)",
   );
