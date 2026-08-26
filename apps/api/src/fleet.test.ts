@@ -237,4 +237,30 @@ describe("fleet + dashboard API", () => {
       await app.close();
     }
   });
+
+  it("token detail regenerates artifacts (no file bodies) and lists files", async () => {
+    const app = await makeServer();
+    try {
+      const id = await createToken(app, "word_doc");
+      const res = await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` });
+      expect(res.statusCode).toBe(200);
+      const detail = res.json() as {
+        artifacts: { kind: string; label: string; value: string; file?: unknown }[];
+        files: { idx: number; filename: string; contentType: string }[];
+      };
+      expect(detail.artifacts.length).toBeGreaterThan(0);
+      // Embedded file bodies must not ship in the detail response.
+      expect(detail.artifacts.every((a) => a.file === undefined)).toBe(true);
+      const doc = detail.files.find((f) => f.filename === "quarterly_report.docx");
+      expect(doc).toBeDefined();
+      const dl = await app.inject({
+        method: "GET",
+        url: `/api/v1/tokens/${id}/files/${doc!.idx}`,
+      });
+      expect(dl.statusCode).toBe(200);
+      expect(dl.headers["content-type"]).toContain("wordprocessingml");
+    } finally {
+      await app.close();
+    }
+  });
 });

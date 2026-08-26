@@ -157,7 +157,24 @@ export function registerTokenRoutes(
         .from(incidents)
         .where(eq(incidents.tokenId, id))
         .get()?.count ?? 0;
-    return { ...row, hitCount };
+    // Artifacts are deterministic (type + config + id): regenerate for
+    // display, stripping embedded file bodies (downloaded via /files/:idx).
+    const def = getTokenType(row.type as Parameters<typeof getTokenType>[0]);
+    const artifacts = def
+      ? def
+          .generate(generateContextFor(row.id, row.config as Record<string, unknown>))
+          .map(({ kind, label, value }) => ({ kind, label, value }))
+      : [];
+    const files = db
+      .select({
+        idx: tokenFiles.idx,
+        filename: tokenFiles.filename,
+        contentType: tokenFiles.contentType,
+      })
+      .from(tokenFiles)
+      .where(eq(tokenFiles.tokenId, id))
+      .all();
+    return { ...row, hitCount, artifacts, files };
   });
 
   app.delete("/api/v1/tokens/:id", async (request, reply) => {

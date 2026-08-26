@@ -50,6 +50,18 @@ export interface TokenRow {
   hitCount?: number;
 }
 
+export interface TokenFileRow {
+  idx: number;
+  filename: string;
+  contentType: string;
+}
+
+/** GET /tokens/:id — list row plus display artifacts and stored files. */
+export interface TokenDetail extends TokenRow {
+  artifacts?: TokenArtifact[];
+  files?: TokenFileRow[];
+}
+
 export interface GeoInfo {
   country?: string;
   countryName?: string;
@@ -139,11 +151,20 @@ export const api = {
   listTokens: () => request<TokenRow[]>("/tokens"),
   getStats: () => request<DashboardStats>("/stats"),
   createToken: (type: string, memo?: string, config: object = {}) =>
-    request<TokenRow>("/tokens", {
+    request<TokenRow & { artifacts?: TokenArtifact[] }>("/tokens", {
       method: "POST",
       body: JSON.stringify({ type, memo, config }),
     }),
-  revokeToken: (id: string) => request(`/tokens/${id}`, { method: "DELETE" }),
+  getToken: (id: string) => request<TokenDetail>(`/tokens/${id}`),
+  deleteToken: (id: string, hard = false) =>
+    request(`/tokens/${id}${hard ? "?hard=true" : ""}`, { method: "DELETE" }),
+  setTokenStatus: (id: string, status: "active" | "paused" | "revoked") =>
+    request(`/tokens/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  uploadTokenImage: (id: string, image: { data: string; contentType: string; filename?: string }) =>
+    request(`/tokens/${id}/image`, { method: "POST", body: JSON.stringify(image) }),
   listIncidents: () => request<Incident[]>("/incidents"),
   getIncident: (id: string) => request<Incident>(`/incidents/${id}`),
   ackIncident: (id: string) =>
