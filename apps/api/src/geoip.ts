@@ -16,6 +16,9 @@ export interface GeoInfo {
   city?: string;
   asn?: number;
   org?: string;
+  /** Present when the .mmdb provides them (GeoLite2-City / DB-IP city). */
+  lat?: number;
+  lon?: number;
 }
 
 export interface GeoLookup {
@@ -50,6 +53,8 @@ export function createGeoLookup(
           if (r.traits?.autonomous_system_organization) {
             geo.org = r.traits.autonomous_system_organization;
           }
+          if (typeof r.location?.latitude === "number") geo.lat = r.location.latitude;
+          if (typeof r.location?.longitude === "number") geo.lon = r.location.longitude;
           return Object.keys(geo).length > 0 ? geo : null;
         } catch {
           return null; // malformed IP or reader hiccup — never break ingest

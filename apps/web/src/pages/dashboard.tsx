@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import geoData from "world-atlas/countries-110m.json";
 import {
   Area,
   AreaChart,
@@ -339,6 +341,80 @@ function Empty({ text }: { text: string }) {
   );
 }
 
+/** World map of incident origins, from GeoIP lat/lon enrichment. */
+function GeoMapPanel({
+  points,
+  countries,
+}: {
+  points: DashboardStats["geoPoints"];
+  countries: DashboardStats["byCountry"];
+}) {
+  const max = Math.max(1, ...points.map((p) => p.count));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Incident origins</CardTitle>
+        <CardDescription>
+          source-IP geolocation — set F0_GEOIP_DB on the API to enable
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {points.length === 0 ? (
+          <Empty text="No geolocated incidents yet (GeoIP disabled or no enriched incidents)." />
+        ) : (
+          <ComposableMap
+            projection="geoMercator"
+            projectionConfig={{ scale: 118, center: [10, 30] }}
+            className="h-52 w-full"
+          >
+            <Geographies geography={geoData}>
+              {({ geographies }) =>
+                geographies.map((geo) => (
+                  <Geography
+                    key={geo.rsmKey}
+                    geography={geo}
+                    fill="var(--color-border-strong)"
+                    stroke="var(--color-border)"
+                    strokeWidth={0.4}
+                    style={{
+                      default: { outline: "none" },
+                      hover: { outline: "none", fill: "var(--color-muted)" },
+                      pressed: { outline: "none" },
+                    }}
+                  />
+                ))
+              }
+            </Geographies>
+            {points.map((p, i) => (
+              <Marker key={i} coordinates={[p.lon, p.lat]}>
+                <circle
+                  r={2.5 + (p.count / max) * 6}
+                  fill="var(--color-accent)"
+                  fillOpacity={0.8}
+                  stroke="var(--color-accent)"
+                  strokeOpacity={0.25}
+                  strokeWidth={5}
+                >
+                  <title>{`${p.country ?? "unknown"}: ${p.count} incident(s)`}</title>
+                </circle>
+              </Marker>
+            ))}
+          </ComposableMap>
+        )}
+        {countries.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+            {countries.slice(0, 5).map((c) => (
+              <span key={c.country} className="font-mono text-xs text-muted">
+                {c.country} <span className="text-accent">{c.count}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function RecentIncidents({ incidents }: { incidents: Incident[] }) {
   return (
     <Card>
@@ -471,19 +547,16 @@ export function DashboardPage() {
               to="/agents"
             />
           </div>
-          <Timeline data={stats.timeline} />
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <Timeline data={stats.timeline} />
+            </div>
             <SeverityDonut bySeverity={stats.bySeverity} />
-            <BarList
-              title="Incidents by token type"
-              description="All-time"
-              rows={stats.byType.slice(0, 7).map((t) => ({
-                label: t.type,
-                count: t.count,
-                href: `/incidents?type=${t.type}`,
-              }))}
-              mono
-            />
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <GeoMapPanel points={stats.geoPoints} countries={stats.byCountry} />
+            </div>
             <BarList
               title="Top source IPs"
               description="Most active origins"
@@ -497,9 +570,13 @@ export function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <BarList
-              title="Countries"
-              description="GeoIP of source IPs (needs F0_GEOIP_DB)"
-              rows={stats.byCountry.slice(0, 7).map((c) => ({ label: c.country, count: c.count }))}
+              title="Incidents by token type"
+              description="All-time"
+              rows={stats.byType.slice(0, 7).map((t) => ({
+                label: t.type,
+                count: t.count,
+                href: `/incidents?type=${t.type}`,
+              }))}
               mono
             />
             <BarList

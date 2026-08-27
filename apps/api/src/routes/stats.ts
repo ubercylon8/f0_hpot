@@ -111,6 +111,23 @@ export function registerStatsRoutes(app: FastifyInstance, db: Db): void {
       .limit(10)
       .all();
 
+    // Map points: incident counts at enriched coordinates.
+    const geoPoints = db
+      .select({
+        lat: sql<number>`json_extract(geo, '$.lat')`,
+        lon: sql<number>`json_extract(geo, '$.lon')`,
+        country,
+        count: sql<number>`count(*)`,
+      })
+      .from(incidents)
+      .where(sql`json_extract(geo, '$.lat') IS NOT NULL`)
+      .groupBy(
+        sql`json_extract(geo, '$.lat')`,
+        sql`json_extract(geo, '$.lon')`,
+        country,
+      )
+      .all();
+
     const stats: DashboardStats = {
       tokens: {
         total: tokenRows.reduce((n, r) => n + r.count, 0),
@@ -139,6 +156,12 @@ export function registerStatsRoutes(app: FastifyInstance, db: Db): void {
       deployments: { pending: depCount("pending"), failed: depCount("failed") },
       byType,
       topSourceIps,
+      geoPoints: geoPoints.map((p) => ({
+        lat: p.lat,
+        lon: p.lon,
+        country: p.country,
+        count: p.count,
+      })),
       byCountry,
     };
     return stats;

@@ -10,6 +10,7 @@ import {
   dnsEvent,
   forwardIncident,
   gwFetch,
+  httpEvent,
   launchBrowser,
   loginPage,
   makeReporter,
@@ -117,6 +118,30 @@ try {
     await board.getByRole("link").first().click();
     await page.waitForSelector("text=Artifacts");
     if (!page.url().includes("/tokens?id=")) throw new Error(`unexpected url: ${page.url()}`);
+  });
+
+  await check("geo map panel renders markers when GeoIP is enabled", async () => {
+    const status = await apiJson("/api/v1/status");
+    await page.goto(CONSOLE);
+    await page.waitForSelector("text=Incident origins");
+    if (!status.geoipEnabled) {
+      await page.locator("text=No geolocated incidents yet").waitFor();
+      return;
+    }
+    // fire a trigger from a public IP so a marker exists
+    const tok2 = await apiJson("/api/v1/tokens", {
+      method: "POST",
+      body: JSON.stringify({ type: "web_bug", memo: `e2e-geo-${RUN}` }),
+    });
+    await forwardIncident(tok2.id, httpEvent(tok2.id, "91.242.155.33", "e2e-geo"));
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await page.waitForSelector("text=Incident origins");
+    if ((await page.locator("svg path").count()) < 100) {
+      throw new Error("world map did not render");
+    }
+    const markers = await page.locator("svg circle title").count();
+    if (markers === 0) throw new Error("no incident markers on the map");
   });
 } finally {
   await browser.close();

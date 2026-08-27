@@ -54,9 +54,11 @@ try {
   await page.waitForSelector("text=Access control and server configuration");
 
   await check("server status card shows geoip/enrollment/throttle state", async () => {
+    const serverStatus = await apiJson("/api/v1/status");
     const status = card(page, "Server status");
     await status.locator("text=GeoIP enrichment").waitFor();
-    await status.locator("text=disabled").first().waitFor();
+    // badge mirrors the live F0_GEOIP_DB state
+    await status.locator(`text=${serverStatus.geoipEnabled ? "enabled" : "disabled"}`).first().waitFor();
     await status.locator("text=Agent enrollment").waitFor();
     await status.locator("text=configured").waitFor();
     await status.locator("text=Alert throttle").waitFor();

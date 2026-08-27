@@ -42,6 +42,15 @@ export const dashboardStatsSchema = z.object({
   }),
   byType: z.array(z.object({ type: z.string(), count: z.number() })),
   topSourceIps: z.array(z.object({ ip: z.string(), count: z.number() })),
+  /** Incident origin points for the world map (from GeoIP enrichment). */
+  geoPoints: z.array(
+    z.object({
+      lat: z.number(),
+      lon: z.number(),
+      country: z.string().nullable(),
+      count: z.number(),
+    }),
+  ),
   /** ISO country codes from GeoIP enrichment (empty when disabled). */
   byCountry: z.array(z.object({ country: z.string(), count: z.number() })),
 });
