@@ -3,7 +3,9 @@ import type { TriggerEvent } from "@f0/deception-shared";
 import { eventMentionsToken } from "./network-tokens.js";
 import type { TokenTypeDefinition, MatchResult } from "./types.js";
 
-const emptyPdfConfig = z.object({});
+const emptyPdfConfig = z.object({
+  filename: z.string().min(1).max(120).optional(),
+});
 
 /**
  * Cloned website token: fetches a target page, injects our beacon, and
@@ -53,6 +55,7 @@ export const pdfDocToken: TokenTypeDefinition = {
   configSchema: emptyPdfConfig,
   generate(ctx) {
     const url = `${ctx.gatewayOrigin}/${ctx.tokenId}/pixel.gif`;
+    const filename = String(ctx.config["filename"] ?? "confidential_report.pdf");
     const body = buildTrackingPdf({
       title: "Confidential Report",
       bodyText: "This document is confidential. Unauthorized distribution is prohibited.",
@@ -62,10 +65,10 @@ export const pdfDocToken: TokenTypeDefinition = {
       { kind: "url", label: "Tracking URL embedded in PDF", value: url },
       {
         kind: "file_download",
-        label: "confidential_report.pdf",
+        label: filename,
         value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
         file: {
-          filename: "confidential_report.pdf",
+          filename,
           contentType: "application/pdf",
           bodyBase64: body.toString("base64"),
         },

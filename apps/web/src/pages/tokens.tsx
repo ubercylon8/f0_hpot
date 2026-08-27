@@ -86,7 +86,7 @@ function ArtifactsList({
     const filename =
       files?.find((f) => f.idx === idx)?.filename ??
       a.file?.filename ??
-      `token-file-${idx}`;
+      (a.label.includes(".") ? a.label : `download-${idx}`);
     void downloadFile(a.value.replace(/^\/api\/v1/, ""), filename)
       .then(() => toast.success(`downloaded ${filename}`))
       .catch((err: unknown) =>
@@ -141,6 +141,7 @@ function CreateTokenDialog({
   const [decoyPath, setDecoyPath] = useState("");
   const [serverKind, setServerKind] = useState("nginx");
   const [cmdName, setCmdName] = useState("ifconfig");
+  const [filename, setFilename] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ id: string; artifacts: TokenArtifact[] } | null>(null);
 
@@ -151,6 +152,7 @@ function CreateTokenDialog({
     setMemo("");
     setTargetUrl("");
     setDecoyPath("");
+    setFilename("");
   }
 
   async function create() {
@@ -161,6 +163,9 @@ function CreateTokenDialog({
       config["server_kind"] = serverKind;
     }
     if (type === "sensitive_cmd") config["cmd_name"] = cmdName;
+    if (tokenFields(type).includes("filename") && filename.trim()) {
+      config["filename"] = filename.trim();
+    }
     setBusy(true);
     try {
       const t = await api.createToken(type, memo || undefined, config);
@@ -251,6 +256,19 @@ function CreateTokenDialog({
                       <SelectItem value="cat_etc_shadow">cat /etc/shadow</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {tokenFields(type).includes("filename") && (
+                <div className="space-y-1.5">
+                  <Label>Bait filename (optional)</Label>
+                  <Input
+                    placeholder="e.g. Q4-board-pack.docx"
+                    value={filename}
+                    onChange={(e) => setFilename(e.target.value)}
+                  />
+                  <p className="text-xs text-faint">
+                    Name the download something that blends in where you plant it.
+                  </p>
                 </div>
               )}
               <div className="space-y-1.5">

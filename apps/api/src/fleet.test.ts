@@ -397,4 +397,49 @@ describe("fleet + dashboard API", () => {
       await app.close();
     }
   });
+
+  it("operator-chosen bait filenames are used and sanitized", async () => {
+    const app = await makeServer();
+    try {
+      const filesOf = async (id: string) =>
+        (
+          (await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })).json() as {
+            files: { filename: string }[];
+          }
+        ).files;
+
+      // Custom filename flows into token_files.
+      let res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens",
+        payload: { type: "word_doc", config: { filename: "Q4-board-pack.docx" } },
+      });
+      expect(res.statusCode).toBe(201);
+      expect((await filesOf((res.json() as { id: string }).id))[0]?.filename).toBe(
+        "Q4-board-pack.docx",
+      );
+
+      // Path-ish characters are stripped (content-disposition safety).
+      res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens",
+        payload: { type: "qr_code", config: { filename: '../evil"name.png' } },
+      });
+      expect((await filesOf((res.json() as { id: string }).id))[0]?.filename).toBe(
+        ".._evil_name.png",
+      );
+
+      // Defaults still apply without the config field.
+      res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens",
+        payload: { type: "word_doc" },
+      });
+      expect((await filesOf((res.json() as { id: string }).id))[0]?.filename).toBe(
+        "quarterly_report.docx",
+      );
+    } finally {
+      await app.close();
+    }
+  });
 });

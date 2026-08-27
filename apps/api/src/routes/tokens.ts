@@ -68,7 +68,9 @@ export function registerTokenRoutes(
       const ctx = generateContextFor(id, configResult.data);
       const artifacts = def.generate(ctx);
 
-      // Persist generated files for download endpoints.
+      // Persist generated files for download endpoints (filenames are
+      // operator-configurable on several types — sanitize for the
+      // content-disposition header either way).
       let fileIdx = 0;
       for (const artifact of artifacts) {
         if (!artifact.file) continue;
@@ -77,7 +79,7 @@ export function registerTokenRoutes(
             id: newId("file"),
             tokenId: id,
             idx: fileIdx,
-            filename: artifact.file.filename,
+            filename: artifact.file.filename.replace(/["\\/:]/g, "_"),
             contentType: artifact.file.contentType,
             data: artifact.file.bodyBase64,
             createdAt,
@@ -100,7 +102,10 @@ export function registerTokenRoutes(
             id: newId("file"),
             tokenId: id,
             idx: 0,
-            filename: "qr.png",
+            filename: String(configResult.data["filename"] ?? "qr.png").replace(
+              /["\\/:]/g,
+              "_",
+            ),
             contentType: "image/png",
             data: png.toString("base64"),
             createdAt,

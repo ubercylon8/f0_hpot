@@ -123,7 +123,9 @@ export const qrCodeToken: TokenTypeDefinition = {
   description:
     "A unique QR code. Scanning it (or fetching the encoded URL) triggers an alert.",
   group: "document",
-  configSchema: emptyConfig,
+  configSchema: z.object({
+    filename: z.string().min(1).max(120).optional(),
+  }),
   generate(ctx) {
     const targetUrl = `${ctx.gatewayOrigin}/${ctx.tokenId}/qr`;
     return [

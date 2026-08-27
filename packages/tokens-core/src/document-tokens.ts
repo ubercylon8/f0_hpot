@@ -5,6 +5,11 @@ import type { TokenTypeDefinition, GenerateContext, TokenArtifactSpec, MatchResu
 
 const emptyConfig = z.object({});
 
+/** Optional operator-chosen bait filename (falls back to the type default). */
+const filenameField = {
+  filename: z.string().min(1).max(120).optional(),
+};
+
 /**
  * Word document token: a .docx whose embedded image is an EXTERNAL
  * relationship pointing at our tracking pixel. When the document is opened
@@ -16,9 +21,10 @@ export const wordDocToken: TokenTypeDefinition = {
   description:
     "A .docx file with a remote tracking image. Opening it in Word fetches the image and triggers an alert.",
   group: "document",
-  configSchema: emptyConfig,
+  configSchema: z.object({ ...filenameField }),
   generate(ctx) {
     const pixelUrl = `${ctx.gatewayOrigin}/${ctx.tokenId}/pixel.gif`;
+    const filename = String(ctx.config["filename"] ?? "quarterly_report.docx");
     const body = buildOoxmlWithExternalImage({
       appName: "Microsoft Word",
       headingText: "Quarterly Report",
@@ -34,10 +40,10 @@ export const wordDocToken: TokenTypeDefinition = {
       },
       {
         kind: "file_download",
-        label: "quarterly_report.docx",
+        label: filename,
         value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
         file: {
-          filename: "quarterly_report.docx",
+          filename,
           contentType:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           bodyBase64: body.toString("base64"),
@@ -60,9 +66,10 @@ export const excelDocToken: TokenTypeDefinition = {
   description:
     "An .xlsx workbook whose hyperlink targets our tracker. Clicking the link triggers an alert.",
   group: "document",
-  configSchema: emptyConfig,
+  configSchema: z.object({ ...filenameField }),
   generate(ctx) {
     const url = `${ctx.gatewayOrigin}/${ctx.tokenId}/pixel.gif`;
+    const filename = String(ctx.config["filename"] ?? "figures.xlsx");
     const body = buildXlsxWithHyperlink({
       sheetName: "Figures",
       cellLabel: "Open detailed figures",
@@ -72,10 +79,10 @@ export const excelDocToken: TokenTypeDefinition = {
       { kind: "url", label: "Tracking URL embedded in workbook", value: url },
       {
         kind: "file_download",
-        label: "figures.xlsx",
+        label: filename,
         value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
         file: {
-          filename: "figures.xlsx",
+          filename,
           contentType:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           bodyBase64: body.toString("base64"),
@@ -130,10 +137,12 @@ export const sqlInjectionToken: TokenTypeDefinition = {
   configSchema: z.object({
     path: z.string().default("/search.php"),
     server_kind: z.enum(["nginx", "apache"]).default("nginx"),
+    ...filenameField,
   }),
   generate(ctx) {
     const decoyPath = String(ctx.config["path"] ?? "/search.php");
     const serverKind = String(ctx.config["server_kind"] ?? "nginx");
+    const filename = String(ctx.config["filename"] ?? `${serverKind}_snippet.conf`);
     const url = `${ctx.gatewayOrigin}/${ctx.tokenId}/sqli`;
     const rule =
       serverKind === "nginx"
@@ -143,10 +152,10 @@ export const sqlInjectionToken: TokenTypeDefinition = {
       { kind: "url", label: "Canary target", value: url },
       {
         kind: "file_download",
-        label: `${serverKind}_snippet.conf`,
+        label: filename,
         value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
         file: {
-          filename: `${serverKind}_snippet.conf`,
+          filename,
           contentType: "text/plain",
           bodyBase64: Buffer.from(rule).toString("base64"),
         },

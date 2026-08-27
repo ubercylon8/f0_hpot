@@ -85,6 +85,9 @@ scanning fires a high-severity hit.
 Download the generated file and plant it in shared folders, intranets, or as
 bait attachments. Word fetches its embedded remote image on open; Excel fires
 when the hyperlink is clicked. PDF uses open-action/link (viewer dependent).
+Set a custom bait filename at creation — default names like
+`quarterly_report.docx` are fine, but something that blends into *your*
+share drive is better.
 
 ### Cloned website
 Give it a URL to clone (e.g. your VPN portal). You get a lookalike page on

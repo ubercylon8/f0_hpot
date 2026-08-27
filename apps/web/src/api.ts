@@ -146,7 +146,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      // Only when a body is present — an empty body with a JSON
+      // content-type is a 400 (FST_ERR_CTP_EMPTY_JSON_BODY).
+      ...(init?.body ? { "content-type": "application/json" } : {}),
       ...(key ? { authorization: `Bearer ${key}` } : {}),
     },
   });
