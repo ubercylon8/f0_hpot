@@ -46,22 +46,28 @@ function Kpi({
   to?: string;
 }) {
   const card = (
-    <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-faint">
+    <Card className="flex h-full flex-col p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className="truncate text-[11px] font-medium uppercase tracking-wider text-faint"
+          title={label}
+        >
           {label}
         </span>
-        <Icon className={cn("h-4 w-4", alert ? "text-danger" : "text-accent")} />
+        <Icon className={cn("h-4 w-4 shrink-0", alert ? "text-danger" : "text-accent")} />
       </div>
       <div className={cn("mt-2 text-2xl font-semibold tracking-tight", alert && "text-danger")}>
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-xs text-muted">{sub}</div>}
+      {/* Sub is always one line so every card has identical rhythm. */}
+      <div className="mt-auto truncate pt-0.5 text-xs text-muted" title={sub}>
+        {sub ?? "—"}
+      </div>
     </Card>
   );
   if (!to) return card;
   return (
-    <Link to={to} className="block transition-transform hover:-translate-y-0.5">
+    <Link to={to} className="block h-full transition-transform hover:-translate-y-0.5">
       {card}
     </Link>
   );
@@ -415,7 +421,7 @@ export function DashboardPage() {
             agents={data.agents}
             stats={stats}
           />
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid auto-rows-fr grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
             <Kpi
               label="Unacknowledged"
               value={stats.incidents.unacked}
@@ -428,8 +434,20 @@ export function DashboardPage() {
               alert={stats.incidents.unacked > 0}
               to="/incidents?acknowledged=false"
             />
-            <Kpi label="Incidents 24h" value={stats.incidents.last24h} icon={Siren} to="/incidents" />
-            <Kpi label="Incidents 7d" value={stats.incidents.last7d} icon={Activity} to="/incidents" />
+            <Kpi
+              label="Incidents 24h"
+              value={stats.incidents.last24h}
+              sub="last 24 hours"
+              icon={Siren}
+              to="/incidents"
+            />
+            <Kpi
+              label="Incidents 7d"
+              value={stats.incidents.last7d}
+              sub="last 7 days"
+              icon={Activity}
+              to="/incidents"
+            />
             <Kpi
               label="Pending deploys"
               value={stats.deployments.pending}
