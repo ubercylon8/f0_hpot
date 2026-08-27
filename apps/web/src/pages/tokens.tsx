@@ -3,9 +3,12 @@ import { FileDown, Globe, Link2, Plus, Search, Trash2, Upload } from "lucide-rea
 import { toast } from "sonner";
 import {
   api,
+  downloadFile,
+  fetchObjectUrl,
   type Incident,
   type TokenArtifact,
   type TokenDetail,
+  type TokenFileRow,
   type TokenRow,
 } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
@@ -67,9 +70,30 @@ function ArtifactIcon({ kind }: { kind: string }) {
 }
 
 /** Artifact rows with copy/download affordances (create dialog + drawer). */
-function ArtifactsList({ artifacts }: { artifacts: TokenArtifact[] }) {
+function ArtifactsList({
+  artifacts,
+  files,
+}: {
+  artifacts: TokenArtifact[];
+  files?: TokenFileRow[];
+}) {
   if (artifacts.length === 0)
     return <p className="text-xs text-faint">No artifacts for this token type.</p>;
+
+  function download(a: TokenArtifact) {
+    // Resolve a real filename: files prop (drawer) > create-time file spec.
+    const idx = Number(a.value.match(/\/files\/(\d+)/)?.[1] ?? -1);
+    const filename =
+      files?.find((f) => f.idx === idx)?.filename ??
+      a.file?.filename ??
+      `token-file-${idx}`;
+    void downloadFile(a.value.replace(/^\/api\/v1/, ""), filename)
+      .then(() => toast.success(`downloaded ${filename}`))
+      .catch((err: unknown) =>
+        toast.error(err instanceof Error ? err.message : String(err)),
+      );
+  }
+
   return (
     <div className="space-y-1.5">
       {artifacts.map((a, i) => (
@@ -81,11 +105,18 @@ function ArtifactsList({ artifacts }: { artifacts: TokenArtifact[] }) {
           <span className="w-32 shrink-0 text-xs text-muted">{a.label}</span>
           <span className="min-w-0 flex-1 truncate font-mono text-xs">{a.value}</span>
           {a.kind === "file_download" ? (
-            <a href={a.value} download onClick={(e) => e.stopPropagation()}>
-              <Button variant="ghost" size="icon" className="h-7 w-7" title="download">
-                <FileDown className="h-3.5 w-3.5" />
-              </Button>
-            </a>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              title="download"
+              onClick={(e) => {
+                e.stopPropagation();
+                download(a);
+              }}
+            >
+              <FileDown className="h-3.5 w-3.5" />
+            </Button>
           ) : (
             <CopyButton value={a.value} />
           )}
@@ -261,6 +292,27 @@ function CreateTokenDialog({
   );
 }
 
+/** Inline image for an auth-gated API path (plain <img src> sends no Bearer). */
+function AuthImage({ path, alt }: { path: string; alt: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objUrl: string | null = null;
+    let mounted = true;
+    fetchObjectUrl(path)
+      .then((u) => {
+        objUrl = u;
+        if (mounted) setUrl(u);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
+  }, [path]);
+  if (!url) return null;
+  return <img src={url} alt={alt} className="max-h-32 rounded-md border border-border" />;
+}
+
 function ImageUploadCard({ token, onUploaded }: { token: TokenDetail; onUploaded: () => void }) {
   const [busy, setBusy] = useState(false);
   const hasImage = (token.files ?? []).some((f) => f.contentType.startsWith("image/"));
@@ -296,13 +348,7 @@ function ImageUploadCard({ token, onUploaded }: { token: TokenDetail; onUploaded
   return (
     <div className="space-y-2">
       <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Custom image</h3>
-      {hasImage && (
-        <img
-          src={`/api/v1/tokens/${token.id}/files/0`}
-          alt="current bait"
-          className="max-h-32 rounded-md border border-border"
-        />
-      )}
+      {hasImage && <AuthImage path={`/tokens/${token.id}/files/0`} alt="current bait" />}
       <label className="inline-flex cursor-pointer items-center gap-2">
         <input
           type="file"
@@ -522,7 +568,7 @@ function TokenDrawer({
 
               <div className="space-y-2">
                 <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Artifacts</h3>
-                <ArtifactsList artifacts={detail.artifacts ?? []} />
+                <ArtifactsList artifacts={detail.artifacts ?? []} files={detail.files} />
               </div>
 
               {detail.type === "cloned_website" && (

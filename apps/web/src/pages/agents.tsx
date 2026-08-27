@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { KeyRound, Plus, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AgentRow, type ReleaseKeyRow } from "../api.js";
+import { api, downloadFile, type AgentRow, type ReleaseKeyRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -248,9 +248,19 @@ function ReleasesCard() {
               <span className="font-mono text-xs">{f.filename}</span>
               <span className="flex items-center gap-3 text-xs text-muted">
                 {(f.size / 1e6).toFixed(1)} MB
-                <a href={f.url} download>
-                  <Button variant="outline" size="sm">download</Button>
-                </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void downloadFile(f.url.replace(/^\/api\/v1/, ""), f.filename)
+                      .then(() => toast.success(`downloaded ${f.filename}`))
+                      .catch((err: unknown) =>
+                        toast.error(err instanceof Error ? err.message : String(err)),
+                      )
+                  }
+                >
+                  download
+                </Button>
               </span>
             </div>
           ))

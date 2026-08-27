@@ -38,6 +38,8 @@ export interface TokenArtifact {
   kind: "url" | "hostname" | "file_download";
   label: string;
   value: string;
+  /** Present in create responses for file_download artifacts. */
+  file?: { filename: string; contentType: string };
 }
 
 export interface TokenRow {
@@ -167,6 +169,35 @@ export async function login(key: string): Promise<void> {
     body: JSON.stringify({ key }),
   });
   if (!res.ok) throw new Error(`${res.status}: invalid key`);
+}
+
+/**
+ * Authenticated file download. Plain <a href download> navigations do NOT
+ * send our Bearer key, so they 401 whenever console auth is enforced —
+ * fetch as a blob and save via an object URL instead.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const key = getApiKey();
+  const res = await fetch(`${BASE}${path}`, {
+    headers: key ? { authorization: `Bearer ${key}` } : {},
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Same authenticated-fetch pattern for inline <img> sources. */
+export async function fetchObjectUrl(path: string): Promise<string> {
+  const key = getApiKey();
+  const res = await fetch(`${BASE}${path}`, {
+    headers: key ? { authorization: `Bearer ${key}` } : {},
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return URL.createObjectURL(await res.blob());
 }
 
 export const api = {
