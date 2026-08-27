@@ -2,7 +2,7 @@ import { and, desc, eq, gte, isNotNull, sql, type SQL } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { DashboardStats } from "@f0/deception-shared";
 import type { Db } from "../db/index.js";
-import { agents, incidents, tokens } from "../db/schema.js";
+import { agentDeployments, agents, incidents, tokens } from "../db/schema.js";
 
 const DAY_MS = 86_400_000;
 
@@ -66,6 +66,23 @@ export function registerStatsRoutes(app: FastifyInstance, db: Db): void {
     const sevCount = (s: string) =>
       severityRows.find((r) => r.severity === s)?.count ?? 0;
 
+    const unackedSevRows = db
+      .select({ severity: incidents.severity, count: sql<number>`count(*)` })
+      .from(incidents)
+      .where(eq(incidents.acknowledged, false))
+      .groupBy(incidents.severity)
+      .all();
+    const unackedSevCount = (s: string) =>
+      unackedSevRows.find((r) => r.severity === s)?.count ?? 0;
+
+    const deploymentRows = db
+      .select({ status: agentDeployments.status, count: sql<number>`count(*)` })
+      .from(agentDeployments)
+      .groupBy(agentDeployments.status)
+      .all();
+    const depCount = (s: string) =>
+      deploymentRows.find((r) => r.status === s)?.count ?? 0;
+
     const byType = db
       .select({ type: tokens.type, count: sql<number>`count(*)` })
       .from(incidents)
@@ -114,6 +131,12 @@ export function registerStatsRoutes(app: FastifyInstance, db: Db): void {
         medium: sevCount("medium"),
         high: sevCount("high"),
       },
+      unackedBySeverity: {
+        low: unackedSevCount("low"),
+        medium: unackedSevCount("medium"),
+        high: unackedSevCount("high"),
+      },
+      deployments: { pending: depCount("pending"), failed: depCount("failed") },
       byType,
       topSourceIps,
       byCountry,

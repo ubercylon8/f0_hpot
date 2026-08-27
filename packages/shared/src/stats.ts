@@ -29,6 +29,17 @@ export const dashboardStatsSchema = z.object({
     medium: z.number(),
     high: z.number(),
   }),
+  /** Unacknowledged incidents by severity — what triage should hit first. */
+  unackedBySeverity: z.object({
+    low: z.number(),
+    medium: z.number(),
+    high: z.number(),
+  }),
+  /** Remote token deployments by status (failed is all-time). */
+  deployments: z.object({
+    pending: z.number(),
+    failed: z.number(),
+  }),
   byType: z.array(z.object({ type: z.string(), count: z.number() })),
   topSourceIps: z.array(z.object({ ip: z.string(), count: z.number() })),
   /** ISO country codes from GeoIP enrichment (empty when disabled). */

@@ -148,6 +148,8 @@ describe("fleet + dashboard API", () => {
       expect(stats.incidents.unacked).toBe(1);
       expect(stats.incidents.last24h).toBe(1);
       expect(stats.bySeverity).toEqual({ low: 0, medium: 1, high: 0 });
+      expect(stats.unackedBySeverity).toEqual({ low: 0, medium: 1, high: 0 });
+      expect(stats.deployments).toEqual({ pending: 0, failed: 0 });
       expect(stats.byType).toContainEqual({ type: "web_bug", count: 1 });
       expect(stats.timeline.length).toBe(30);
       expect(stats.timeline[29]?.count).toBe(1);

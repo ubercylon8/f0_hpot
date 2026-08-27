@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FileDown, Globe, Link2, Plus, Search, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -692,7 +693,9 @@ export function TokensPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  // Deep link: /tokens?id=<id> opens that token's drawer.
+  const [selected, setSelected] = useState<string | null>(() => searchParams.get("id"));
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);

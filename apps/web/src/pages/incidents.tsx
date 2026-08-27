@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCheck, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { CheckCheck, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Incident } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
@@ -59,11 +60,14 @@ function NotesEditor({ incident, onSaved }: { incident: Incident; onSaved: () =>
 }
 
 export function IncidentsPage() {
-  const [severity, setSeverity] = useState("all");
-  const [type, setType] = useState("all");
-  const [acked, setAcked] = useState("all");
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Deep-linkable filter state (dashboard widgets link here with params).
+  const [severity, setSeverity] = useState(() => searchParams.get("severity") ?? "all");
+  const [type, setType] = useState(() => searchParams.get("type") ?? "all");
+  const [acked, setAcked] = useState(() => searchParams.get("acknowledged") ?? "all");
+  const [sourceIp, setSourceIp] = useState(() => searchParams.get("source_ip") ?? "");
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
 
   // Debounce the free-text filter (server matches raw event JSON).
   useEffect(() => {
@@ -76,6 +80,7 @@ export function IncidentsPage() {
       severity: severity === "all" ? undefined : severity,
       type: type === "all" ? undefined : type,
       acknowledged: acked === "all" ? undefined : acked,
+      source_ip: sourceIp || undefined,
       q: q || undefined,
     }),
   );
@@ -83,10 +88,12 @@ export function IncidentsPage() {
   // Refetch immediately when a filter changes (the 15s interval continues).
   useEffect(() => {
     void reload();
-  }, [severity, type, acked, q, reload]);
+  }, [severity, type, acked, sourceIp, q, reload]);
 
   const list = useMemo(() => incidents ?? [], [incidents]);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(
+    () => searchParams.get("expanded"),
+  );
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const selectable = list.filter((i) => !i.acknowledged);
@@ -173,6 +180,27 @@ export function IncidentsPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {sourceIp && (
+        <div className="flex items-center gap-2">
+          <Badge variant="accent" className="gap-1.5">
+            ip: {sourceIp}
+            <button
+              className="cursor-pointer hover:text-foreground"
+              title="clear IP filter"
+              onClick={() => {
+                setSourceIp("");
+                setSearchParams((prev) => {
+                  prev.delete("source_ip");
+                  return prev;
+                });
+              }}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        </div>
+      )}
 
       {selectable.length > 0 && (
         <label className="flex items-center gap-2 text-xs text-muted">
