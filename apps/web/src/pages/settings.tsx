@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { KeyRound, Plus, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AuthKeyRow, type ServerStatus } from "../api.js";
+import { api, getApiKey, setApiKey, type AuthKeyRow, type ServerStatus } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -65,6 +65,10 @@ function ApiKeysCard() {
     setBusy(true);
     try {
       const k = await api.createAuthKey(label.trim());
+      // Bootstrap path: in open mode the first key closes auth the
+      // instant it exists — adopt it as the session key or every
+      // follow-up call 401s and the show-once box is lost.
+      if (!getApiKey()) setApiKey(k.key);
       setFresh(k);
       setLabel("");
       void reload();
