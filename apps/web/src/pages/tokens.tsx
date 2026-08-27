@@ -183,8 +183,13 @@ function CreateTokenDialog({
     }
   }
 
+  function handleOpenChange(o: boolean) {
+    onOpenChange(o);
+    if (!o) reset();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         {created === null ? (
           <>
@@ -305,7 +310,7 @@ function CreateTokenDialog({
               <Button variant="outline" onClick={reset}>
                 create another
               </Button>
-              <Button onClick={() => onOpenChange(false)}>done</Button>
+              <Button onClick={() => handleOpenChange(false)}>done</Button>
             </DialogFooter>
           </>
         )}

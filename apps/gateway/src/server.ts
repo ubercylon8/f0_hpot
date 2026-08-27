@@ -93,4 +93,22 @@ startSmtpServer({
     .filter(Boolean),
   onEvent,
 });
+
+// Startup self-check: if the API enforces auth and our secret is wrong or
+// missing, incident forwarding and artifact lookups will be rejected —
+// say so loudly instead of silently dropping triggers. The API may not be
+// up yet, so only a definitive 401/403 warns; anything else is ignored.
+{
+  const res = await fetch(`${apiBaseUrl}/api/v1/status`, {
+    signal: AbortSignal.timeout(3000),
+    headers: apiInternalSecret ? { authorization: `Bearer ${apiInternalSecret}` } : {},
+  }).catch(() => null);
+  if (res && (res.status === 401 || res.status === 403)) {
+    console.error(
+      `WARNING: API answered ${res.status} for the gateway credentials. ` +
+        "Incident forwarding and internal artifact lookups will be REJECTED. " +
+        "Set F0_INTERNAL_SECRET on both the API and the gateway.",
+    );
+  }
+}
 console.log(`gateway SMTP listening on :${smtpPort}`);
