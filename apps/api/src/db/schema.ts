@@ -125,3 +125,20 @@ export const releaseKeys = sqliteTable("release_keys", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const codeSigningCerts = sqliteTable("code_signing_certs", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  // Display metadata parsed from the certificate.
+  subject: text("subject").notNull(),
+  issuer: text("issuer").notNull(),
+  notAfter: text("not_after").notNull(),
+  // base64 PKCS#12 bundle (cert + private key) and its passphrase.
+  // Signs agent binaries for Authenticode (SmartScreen/ASR trust in orgs
+  // where this cert is deployed). Protect the DB.
+  pfx: text("pfx").notNull(),
+  passphrase: text("passphrase").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

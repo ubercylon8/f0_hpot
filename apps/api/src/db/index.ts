@@ -91,6 +91,17 @@ export function migrate(db: Db): void {
       private_key TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS code_signing_certs (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      issuer TEXT NOT NULL,
+      not_after TEXT NOT NULL,
+      pfx TEXT NOT NULL,
+      passphrase TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Additive column migrations (SQLite has no IF NOT EXISTS for columns).

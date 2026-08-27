@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Plus, Terminal, Trash2 } from "lucide-react";
+import { KeyRound, Plus, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, downloadFile, type AgentRow, type ReleaseKeyRow } from "../api.js";
+import { api, downloadFile, type AgentRow, type CodeSignCertRow, type ReleaseKeyRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -266,6 +266,164 @@ function ReleasesCard() {
           ))
         )}
         {manifest && <p className="pt-1 text-xs text-accent">✓ signed release manifest present</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CodeSigningCard() {
+  const [certs, setCerts] = useState<CodeSignCertRow[] | null>(null);
+  const [label, setLabel] = useState("");
+  const [cn, setCn] = useState("f0_hpot Local Code Signing");
+  const [genPass, setGenPass] = useState("");
+  const [upLabel, setUpLabel] = useState("");
+  const [upPass, setUpPass] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => api.listCodeSignCerts().then(setCerts).catch(() => setCerts([]));
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  async function run(fn: () => Promise<unknown>, done: string) {
+    setBusy(true);
+    try {
+      await fn();
+      toast.success(done);
+      void reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function upload(file: File) {
+    if (!upLabel.trim() || !upPass) {
+      toast.error("set a label and the .p12 passphrase before choosing the file");
+      return;
+    }
+    void run(async () => {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(new Error("read failed"));
+        r.readAsDataURL(file);
+      });
+      const b64 = dataUrl.split(",")[1] ?? "";
+      await api.uploadCodeSignCert(upLabel.trim(), b64, upPass);
+      setUpLabel("");
+      setUpPass("");
+    }, `certificate "${upLabel.trim()}" stored`);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-accent" /> Code signing (Authenticode)
+        </CardTitle>
+        <CardDescription>
+          Sign the Windows agent binary with an org-trusted certificate so
+          SmartScreen/ASR accept it. Distinct from the Ed25519 update-manifest
+          keys above: those keep <em>updates</em> honest — this gets the binary{" "}
+          <em>running</em> on org endpoints where the cert is deployed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {(certs ?? []).map((c) => (
+          <div key={c.id} className="flex items-center gap-3 text-xs">
+            <Badge variant="outline">{c.label}</Badge>
+            <span className="min-w-0 flex-1 truncate text-muted" title={c.subject}>
+              {c.subject}
+            </span>
+            <span className="shrink-0 text-faint">
+              expires {new Date(c.notAfter).toLocaleDateString()}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void api
+                  .codeSignRelease(c.id)
+                  .then((r) => toast.success(`signed ${r.file} with ${c.label}`))
+                  .catch((err: unknown) =>
+                    toast.error(err instanceof Error ? err.message : String(err)),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            >
+              sign .exe
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-danger hover:text-danger"
+              disabled={busy}
+              onClick={() => void run(() => api.deleteCodeSignCert(c.id), `cert "${c.label}" deleted`)}
+            >
+              delete
+            </Button>
+          </div>
+        ))}
+        {(certs ?? []).length === 0 && (
+          <p className="text-xs text-faint">
+            No certificates yet — generate an org-local one below or upload an
+            existing .p12.
+          </p>
+        )}
+        <div className="space-y-2 border-t border-border pt-3">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-faint">
+            generate self-signed (org-local)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} className="h-8 w-36" />
+            <Input placeholder="common name (CN)" value={cn} onChange={(e) => setCn(e.target.value)} className="h-8 min-w-52 flex-1" />
+            <Input type="password" placeholder="passphrase" value={genPass} onChange={(e) => setGenPass(e.target.value)} className="h-8 w-36" />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || !label.trim() || !cn.trim() || genPass.length < 4}
+              onClick={() =>
+                void run(async () => {
+                  await api.generateCodeSignCert(label.trim(), cn.trim(), genPass);
+                  setLabel("");
+                  setGenPass("");
+                }, `certificate "${label.trim()}" generated`)
+              }
+            >
+              generate
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 border-t border-border pt-3">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-faint">
+            or upload .p12 / .pfx
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input placeholder="label" value={upLabel} onChange={(e) => setUpLabel(e.target.value)} className="h-8 w-36" />
+            <Input type="password" placeholder="passphrase" value={upPass} onChange={(e) => setUpPass(e.target.value)} className="h-8 w-36" />
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input
+                type="file"
+                accept=".p12,.pfx,application/x-pkcs12"
+                className="hidden"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) upload(f);
+                  e.target.value = "";
+                }}
+              />
+              <span className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-raised px-3 text-xs text-foreground hover:bg-overlay">
+                <Upload className="h-3.5 w-3.5" />
+                choose .p12
+              </span>
+            </label>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -616,6 +774,9 @@ export function AgentsPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ReleasesCard />
         <SigningKeysCard />
+        <div className="lg:col-span-2">
+          <CodeSigningCard />
+        </div>
       </div>
 
       <AddAgentDialog open={addOpen} onOpenChange={setAddOpen} />

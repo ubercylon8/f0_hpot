@@ -9,6 +9,7 @@ import { registerReleaseRoutes } from "./routes/releases.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
+import { registerCodeSignRoutes } from "./routes/codesign.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
 import { buildAuthContext, isOpenMode, makeAuthHook } from "./auth.js";
 import { createGeoLookup } from "./geoip.js";
@@ -48,6 +49,7 @@ export function buildServer(opts: { dbPath?: string } = {}) {
   registerAlertRoutes(app, db, dispatcher);
   registerAgentRoutes(app, db);
   registerReleaseRoutes(app, db);
+  registerCodeSignRoutes(app, db);
   registerStatsRoutes(app, db);
   registerStatusRoutes(app, {
     geoEnabled: geo.enabled,

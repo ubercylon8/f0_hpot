@@ -13,7 +13,11 @@
  *   F0_E2E_KEY=f0k_... node scripts/e2e/agents-ui.mjs
  */
 import { createPublicKey, verify } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   CONSOLE,
   apiJson,
@@ -166,6 +170,34 @@ try {
     const canonical = canonicalManifestBytes(manifest.version, manifest.files);
     const ok = verify(null, Buffer.from(canonical, "utf8"), pub, Buffer.from(manifest.signature, "base64"));
     if (!ok) throw new Error("signature invalid");
+  });
+
+  await check("code signing: generate cert via UI and Authenticode-sign the exe", async () => {
+    const certLabel = `e2e-cert-${RUN}`;
+    const card = page.locator("div.rounded-lg.border.bg-surface", {
+      hasText: "Code signing (Authenticode)",
+    });
+    await card.getByPlaceholder("label").first().fill(certLabel);
+    await card.getByPlaceholder("passphrase").first().fill("e2e-pass");
+    await card.getByRole("button", { name: "generate", exact: true }).click();
+    await page.waitForSelector(`text=certificate "${certLabel}" generated`);
+    const certRow = card.locator("div.flex.items-center.gap-3", { hasText: certLabel });
+    await certRow.getByRole("button", { name: "sign .exe" }).click();
+    await page.waitForSelector("text=signed f0-deception-agent-windows-amd64.exe", {
+      timeout: 30_000,
+    });
+    // The PE must now carry an extractable Authenticode signature.
+    const exe = path.join(RELEASE_DIR, "f0-deception-agent-windows-amd64.exe");
+    const sigDir = mkdtempSync(path.join(tmpdir(), "f0-sig-"));
+    try {
+      const out = path.join(sigDir, "sig.der");
+      execFileSync("osslsigncode", ["extract-signature", "-in", exe, "-out", out]);
+      if (!existsSync(out) || statSync(out).size < 100) {
+        throw new Error("no signature found in the signed exe");
+      }
+    } finally {
+      rmSync(sigDir, { recursive: true, force: true });
+    }
   });
 
   await check("retire removes the agent after the danger confirm", async () => {

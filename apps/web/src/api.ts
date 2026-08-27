@@ -141,6 +141,15 @@ export interface ReleaseKeyRow {
   createdAt: string;
 }
 
+export interface CodeSignCertRow {
+  id: string;
+  label: string;
+  subject: string;
+  issuer: string;
+  notAfter: string;
+  createdAt: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const key = getApiKey();
   const res = await fetch(`${BASE}${path}`, {
@@ -264,6 +273,23 @@ export const api = {
     request<{ ok: boolean; version: string; files: string[] }>("/agent-releases/sign", {
       method: "POST",
       body: JSON.stringify(version ? { keyId, version } : { keyId }),
+    }),
+  listCodeSignCerts: () => request<CodeSignCertRow[]>("/codesign-certs"),
+  generateCodeSignCert: (label: string, commonName: string, passphrase: string) =>
+    request<CodeSignCertRow>("/codesign-certs", {
+      method: "POST",
+      body: JSON.stringify({ label, generate: true, commonName, passphrase }),
+    }),
+  uploadCodeSignCert: (label: string, pfx: string, passphrase: string) =>
+    request<CodeSignCertRow>("/codesign-certs", {
+      method: "POST",
+      body: JSON.stringify({ label, pfx, passphrase }),
+    }),
+  deleteCodeSignCert: (id: string) => request(`/codesign-certs/${id}`, { method: "DELETE" }),
+  codeSignRelease: (certId: string) =>
+    request<{ ok: boolean; file: string }>("/agent-releases/codesign", {
+      method: "POST",
+      body: JSON.stringify({ certId }),
     }),
   setAgentSensors: (id: string, sensors: { kind: string; enabled: boolean; config: object }[]) =>
     request(`/agents/${id}/sensors`, {
