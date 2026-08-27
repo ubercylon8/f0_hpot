@@ -206,7 +206,7 @@ export const api = {
   listTokens: () => request<TokenRow[]>("/tokens"),
   getStats: () => request<DashboardStats>("/stats"),
   createToken: (type: string, memo?: string, config: object = {}) =>
-    request<TokenRow & { artifacts?: TokenArtifact[] }>("/tokens", {
+    request<TokenRow & { artifacts?: TokenArtifact[]; files?: TokenFileRow[] }>("/tokens", {
       method: "POST",
       body: JSON.stringify({ type, memo, config }),
     }),

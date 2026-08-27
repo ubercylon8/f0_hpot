@@ -408,13 +408,16 @@ describe("fleet + dashboard API", () => {
           }
         ).files;
 
-      // Custom filename flows into token_files.
+      // Custom filename flows into token_files (and is returned by create).
       let res = await app.inject({
         method: "POST",
         url: "/api/v1/tokens",
         payload: { type: "word_doc", config: { filename: "Q4-board-pack.docx" } },
       });
       expect(res.statusCode).toBe(201);
+      expect((res.json() as { files: { filename: string }[] }).files[0]?.filename).toBe(
+        "Q4-board-pack.docx",
+      );
       expect((await filesOf((res.json() as { id: string }).id))[0]?.filename).toBe(
         "Q4-board-pack.docx",
       );

@@ -143,7 +143,11 @@ function CreateTokenDialog({
   const [cmdName, setCmdName] = useState("ifconfig");
   const [filename, setFilename] = useState("");
   const [busy, setBusy] = useState(false);
-  const [created, setCreated] = useState<{ id: string; artifacts: TokenArtifact[] } | null>(null);
+  const [created, setCreated] = useState<{
+    id: string;
+    artifacts: TokenArtifact[];
+    files: TokenFileRow[];
+  } | null>(null);
 
   const typeInfo = TOKEN_TYPES.find((t) => t.id === type);
 
@@ -169,7 +173,7 @@ function CreateTokenDialog({
     setBusy(true);
     try {
       const t = await api.createToken(type, memo || undefined, config);
-      setCreated({ id: t.id, artifacts: t.artifacts ?? [] });
+      setCreated({ id: t.id, artifacts: t.artifacts ?? [], files: t.files ?? [] });
       toast.success(`Token ${t.id} created`);
       onCreated();
     } catch (err) {
@@ -296,7 +300,7 @@ function CreateTokenDialog({
                 Deploy these artifacts — the URL/hostname ones copy to your clipboard.
               </DialogDescription>
             </DialogHeader>
-            <ArtifactsList artifacts={created.artifacts} />
+            <ArtifactsList artifacts={created.artifacts} files={created.files} />
             <DialogFooter>
               <Button variant="outline" onClick={reset}>
                 create another

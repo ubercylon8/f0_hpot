@@ -131,6 +131,17 @@ export function registerTokenRoutes(
         status: "active",
         config: configResult.data,
         artifacts,
+        // Persisted files so the console can name downloads correctly
+        // right from the create dialog (mirrors GET /tokens/:id).
+        files: db
+          .select({
+            idx: tokenFiles.idx,
+            filename: tokenFiles.filename,
+            contentType: tokenFiles.contentType,
+          })
+          .from(tokenFiles)
+          .where(eq(tokenFiles.tokenId, id))
+          .all(),
         createdAt,
         hitCount: 0,
       });
