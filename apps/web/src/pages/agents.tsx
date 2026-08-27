@@ -45,6 +45,93 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+/** Checkbox selection state shared by the four removable lists on this page. */
+function useSelection() {
+  const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
+  const [confirm, setConfirm] = useState(false);
+  const toggle = (id: string) => {
+    const next = new Set(sel);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSel(next);
+    setConfirm(false);
+  };
+  const toggleAll = (ids: string[]) => {
+    setSel((cur) =>
+      ids.length > 0 && ids.every((i) => cur.has(i)) ? new Set() : new Set(ids),
+    );
+    setConfirm(false);
+  };
+  const clear = () => {
+    setSel(new Set());
+    setConfirm(false);
+  };
+  return { sel, confirm, setConfirm, toggle, toggleAll, clear };
+}
+
+function SelectionBar({
+  count,
+  label,
+  confirm,
+  setConfirm,
+  onDelete,
+  onClear,
+  busy,
+  twoStep = true,
+}: {
+  count: number;
+  label: string;
+  confirm: boolean;
+  setConfirm: (v: boolean) => void;
+  onDelete: () => void;
+  onClear: () => void;
+  busy: boolean;
+  twoStep?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-raised px-3 py-2 text-xs">
+      <span className="font-medium">{count} selected</span>
+      {confirm || !twoStep ? (
+        <Button variant={twoStep ? "destructive" : "outline"} size="sm" disabled={busy} onClick={onDelete}>
+          <Trash2 className="h-3.5 w-3.5" />
+          {busy ? "deleting…" : twoStep ? `confirm ${label}` : label}
+        </Button>
+      ) : null}
+      {confirm && (
+        <Button variant="ghost" size="sm" onClick={() => setConfirm(false)}>
+          cancel
+        </Button>
+      )}
+      {!confirm && twoStep && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-danger hover:text-danger"
+          onClick={() => setConfirm(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {label}…
+        </Button>
+      )}
+      <Button variant="ghost" size="sm" className="ml-auto" onClick={onClear}>
+        clear
+      </Button>
+    </div>
+  );
+}
+
+/** Delete a list of ids with per-item delete calls; report the tally. */
+async function deleteMany(
+  ids: string[],
+  del: (id: string) => Promise<unknown>,
+): Promise<{ ok: number; failed: number }> {
+  const results = await Promise.allSettled(ids.map((id) => del(id)));
+  return {
+    ok: results.filter((r) => r.status === "fulfilled").length,
+    failed: results.filter((r) => r.status === "rejected").length,
+  };
+}
+
 function OnlineDot({ agent }: { agent: AgentRow }) {
   const online =
     agent.status === "online" &&
@@ -58,12 +145,27 @@ function OnlineDot({ agent }: { agent: AgentRow }) {
   );
 }
 
+const AGENT_OS_OPTIONS = [
+  { id: "linux-amd64", label: "Linux · amd64", binary: "f0-deception-agent-linux-amd64", kind: "shell", note: "installs as a systemd service" },
+  { id: "linux-arm64", label: "Linux · arm64", binary: "f0-deception-agent-linux-arm64", kind: "shell", note: "installs as a systemd service" },
+  { id: "darwin-amd64", label: "macOS · Intel", binary: "f0-deception-agent-darwin-amd64", kind: "shell", note: "installs as a launchd agent" },
+  { id: "darwin-arm64", label: "macOS · Apple Silicon", binary: "f0-deception-agent-darwin-arm64", kind: "shell", note: "installs as a launchd agent" },
+  {
+    id: "windows-amd64",
+    label: "Windows · amd64",
+    binary: "f0-deception-agent-windows-amd64.exe",
+    kind: "powershell",
+    note: "runs in the foreground — Windows service install isn't implemented yet; register a scheduled task manually",
+  },
+] as const;
+
 function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const [bootstrap, setBootstrap] = useState<string | null>(null);
   const [managed, setManaged] = useState<EnrollmentTokenRow[]>([]);
   const [fresh, setFresh] = useState<{ id: string; token: string; label: string } | null>(null);
   const [label, setLabel] = useState("");
   const [expires, setExpires] = useState("");
+  const [osId, setOsId] = useState<string>("linux-amd64");
   const [busy, setBusy] = useState(false);
 
   const reload = () => {
@@ -88,10 +190,14 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
       : null;
 
   const origin = window.location.origin;
+  const osOption = AGENT_OS_OPTIONS.find((o) => o.id === osId) ?? AGENT_OS_OPTIONS[0];
   const oneLiner = token
-    ? `curl -LO ${origin}/api/v1/agent-releases/f0-deception-agent-linux-amd64 && ` +
-      `chmod +x f0-deception-agent-linux-amd64 && ` +
-      `sudo ./f0-deception-agent-linux-amd64 --server ${origin} --enroll ${token} --install`
+    ? osOption.kind === "powershell"
+      ? `iwr -Uri ${origin}/api/v1/agent-releases/${osOption.binary} -OutFile ${osOption.binary}; ` +
+        `.\\${osOption.binary} --server ${origin} --enroll ${token}`
+      : `curl -LO ${origin}/api/v1/agent-releases/${osOption.binary} && ` +
+        `chmod +x ${osOption.binary} && ` +
+        `sudo ./${osOption.binary} --server ${origin} --enroll ${token} --install`
     : null;
 
   async function create() {
@@ -128,6 +234,24 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted">Target OS</span>
+              <Select value={osId} onValueChange={setOsId}>
+                <SelectTrigger className="h-8 w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AGENT_OS_OPTIONS.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-faint">{osOption.note}</span>
+            </div>
+          </div>
           {oneLiner ? (
             <div className="space-y-1.5">
               <div className="flex items-start gap-2 rounded-md border border-border bg-background p-3">
@@ -223,6 +347,7 @@ function SigningKeysCard() {
   const [signKey, setSignKey] = useState("");
   const [version, setVersion] = useState("");
   const [busy, setBusy] = useState(false);
+  const sel = useSelection();
 
   const reload = () => api.listReleaseKeys().then(setKeys).catch(() => setKeys([]));
   useEffect(() => {
@@ -272,8 +397,43 @@ function SigningKeysCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {sel.sel.size > 0 && (
+          <SelectionBar
+            count={sel.sel.size}
+            label="delete keys"
+            confirm={sel.confirm}
+            setConfirm={sel.setConfirm}
+            busy={busy}
+            onClear={sel.clear}
+            onDelete={() => {
+              setBusy(true);
+              void deleteMany([...sel.sel], (id) => api.deleteReleaseKey(id)).then((r) => {
+                setBusy(false);
+                if (r.failed > 0) toast.error(`${r.failed} key(s) failed to delete`);
+                else toast.success(`${r.ok} key(s) deleted`);
+                sel.clear();
+                void reload();
+              });
+            }}
+          />
+        )}
+        <label className="flex items-center gap-2 text-[11px] text-faint">
+          <input
+            type="checkbox"
+            className="h-3 w-3 accent-accent"
+            checked={(keys ?? []).length > 0 && (keys ?? []).every((k) => sel.sel.has(k.id))}
+            onChange={() => sel.toggleAll((keys ?? []).map((k) => k.id))}
+          />
+          select all
+        </label>
         {(keys ?? []).map((k) => (
           <div key={k.id} className="flex items-center gap-3 text-xs">
+            <input
+              type="checkbox"
+              className="h-3 w-3 accent-accent"
+              checked={sel.sel.has(k.id)}
+              onChange={() => sel.toggle(k.id)}
+            />
             <Badge variant="outline">{k.label}</Badge>
             <span className="font-mono text-faint">{k.id}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-muted">{k.publicKey}</span>
@@ -349,6 +509,7 @@ function ReleasesCard() {
   const [manifest, setManifest] = useState<string | null>(null);
   const [version, setVersion] = useState("v1.0.0");
   const [busy, setBusy] = useState(false);
+  const sel = useSelection();
 
   const reload = () =>
     api
@@ -379,6 +540,16 @@ function ReleasesCard() {
     }
   }
 
+  async function deleteSelected() {
+    setBusy(true);
+    const r = await deleteMany([...sel.sel], (f) => api.deleteRelease(f));
+    setBusy(false);
+    if (r.failed > 0) toast.error(`${r.failed} file(s) failed to delete`);
+    else toast.success(`${r.ok} file(s) deleted`);
+    sel.clear();
+    void reload();
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -404,49 +575,80 @@ function ReleasesCard() {
             <span className="text-xs text-faint">cross-compiling 5 platforms, ~1 min</span>
           )}
         </div>
+        {sel.sel.size > 0 && (
+          <SelectionBar
+            count={sel.sel.size}
+            label="delete files"
+            confirm={sel.confirm}
+            setConfirm={sel.setConfirm}
+            onDelete={() => void deleteSelected()}
+            onClear={sel.clear}
+            busy={busy}
+            twoStep={false}
+          />
+        )}
         {files.length === 0 ? (
           <p className="text-xs text-faint">No release binaries found.</p>
         ) : (
-          files.map((f) => (
-            <div key={f.filename} className="flex items-center justify-between text-sm">
-              <span className="font-mono text-xs">{f.filename}</span>
-              <span className="flex items-center gap-2 text-xs text-muted">
-                {(f.size / 1e6).toFixed(1)} MB
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    void downloadFile(f.url.replace(/^\/api\/v1/, ""), f.filename)
-                      .then(() => toast.success(`downloaded ${f.filename}`))
-                      .catch((err: unknown) =>
-                        toast.error(err instanceof Error ? err.message : String(err)),
-                      )
-                  }
-                >
-                  download
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-danger hover:text-danger"
-                  title={`delete ${f.filename}`}
-                  onClick={() =>
-                    void api
-                      .deleteRelease(f.filename)
-                      .then(() => {
-                        toast.success(`deleted ${f.filename}`);
-                        void reload();
-                      })
-                      .catch((err: unknown) =>
-                        toast.error(err instanceof Error ? err.message : String(err)),
-                      )
-                  }
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </span>
-            </div>
-          ))
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-faint">
+              <input
+                type="checkbox"
+                className="h-3 w-3 accent-accent"
+                checked={files.every((f) => sel.sel.has(f.filename))}
+                onChange={() => sel.toggleAll(files.map((f) => f.filename))}
+              />
+              select all
+            </label>
+            {files.map((f) => (
+              <div key={f.filename} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 font-mono text-xs">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-accent"
+                    checked={sel.sel.has(f.filename)}
+                    onChange={() => sel.toggle(f.filename)}
+                  />
+                  {f.filename}
+                </span>
+                <span className="flex items-center gap-2 text-xs text-muted">
+                  {(f.size / 1e6).toFixed(1)} MB
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      void downloadFile(f.url.replace(/^\/api\/v1/, ""), f.filename)
+                        .then(() => toast.success(`downloaded ${f.filename}`))
+                        .catch((err: unknown) =>
+                          toast.error(err instanceof Error ? err.message : String(err)),
+                        )
+                    }
+                  >
+                    download
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-danger hover:text-danger"
+                    title={`delete ${f.filename}`}
+                    onClick={() =>
+                      void api
+                        .deleteRelease(f.filename)
+                        .then(() => {
+                          toast.success(`deleted ${f.filename}`);
+                          void reload();
+                        })
+                        .catch((err: unknown) =>
+                          toast.error(err instanceof Error ? err.message : String(err)),
+                        )
+                    }
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </span>
+              </div>
+            ))}
+          </>
         )}
         {manifest && <p className="pt-1 text-xs text-accent">✓ signed release manifest present</p>}
       </CardContent>
@@ -462,6 +664,7 @@ function CodeSigningCard() {
   const [upLabel, setUpLabel] = useState("");
   const [upPass, setUpPass] = useState("");
   const [busy, setBusy] = useState(false);
+  const sel = useSelection();
 
   const reload = () => api.listCodeSignCerts().then(setCerts).catch(() => setCerts([]));
   useEffect(() => {
@@ -514,8 +717,43 @@ function CodeSigningCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {sel.sel.size > 0 && (
+          <SelectionBar
+            count={sel.sel.size}
+            label="delete certs"
+            confirm={sel.confirm}
+            setConfirm={sel.setConfirm}
+            busy={busy}
+            onClear={sel.clear}
+            onDelete={() => {
+              setBusy(true);
+              void deleteMany([...sel.sel], (id) => api.deleteCodeSignCert(id)).then((r) => {
+                setBusy(false);
+                if (r.failed > 0) toast.error(`${r.failed} cert(s) failed to delete`);
+                else toast.success(`${r.ok} cert(s) deleted`);
+                sel.clear();
+                void reload();
+              });
+            }}
+          />
+        )}
+        <label className="flex items-center gap-2 text-[11px] text-faint">
+          <input
+            type="checkbox"
+            className="h-3 w-3 accent-accent"
+            checked={(certs ?? []).length > 0 && (certs ?? []).every((c) => sel.sel.has(c.id))}
+            onChange={() => sel.toggleAll((certs ?? []).map((c) => c.id))}
+          />
+          select all
+        </label>
         {(certs ?? []).map((c) => (
           <div key={c.id} className="flex items-center gap-3 text-xs">
+            <input
+              type="checkbox"
+              className="h-3 w-3 accent-accent"
+              checked={sel.sel.has(c.id)}
+              onChange={() => sel.toggle(c.id)}
+            />
             <Badge variant="outline">{c.label}</Badge>
             <span className="min-w-0 flex-1 truncate text-muted" title={c.subject}>
               {c.subject}
@@ -1002,7 +1240,19 @@ export function AgentsPage() {
   const { data: agents, error, reload } = usePoll<AgentRow[]>(() => api.listAgents());
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<AgentRow | null>(null);
+  const sel = useSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
   const list = agents ?? [];
+
+  async function retireSelected() {
+    setBulkBusy(true);
+    const r = await deleteMany([...sel.sel], (id) => api.deleteAgent(id));
+    setBulkBusy(false);
+    if (r.failed > 0) toast.error(`${r.failed} agent(s) failed to retire`);
+    else toast.success(`${r.ok} agent(s) retired — their keys are dead`);
+    sel.clear();
+    void reload();
+  }
 
   return (
     <section className="space-y-4">
@@ -1014,10 +1264,30 @@ export function AgentsPage() {
       </PageHeader>
       {error && <p className="text-sm text-danger">{error}</p>}
 
+      {sel.sel.size > 0 && (
+        <SelectionBar
+          count={sel.sel.size}
+          label="retire permanently"
+          confirm={sel.confirm}
+          setConfirm={sel.setConfirm}
+          onDelete={() => void retireSelected()}
+          onClear={sel.clear}
+          busy={bulkBusy}
+        />
+      )}
+
       <Card>
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-accent"
+                  checked={list.length > 0 && list.every((a) => sel.sel.has(a.id))}
+                  onChange={() => sel.toggleAll(list.map((a) => a.id))}
+                />
+              </TableHead>
               <TableHead>Hostname</TableHead>
               <TableHead>Memo</TableHead>
               <TableHead>Platform</TableHead>
@@ -1029,6 +1299,14 @@ export function AgentsPage() {
           <TableBody>
             {list.map((a) => (
               <TableRow key={a.id} className="cursor-pointer" onClick={() => setSelected(a)}>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-accent"
+                    checked={sel.sel.has(a.id)}
+                    onChange={() => sel.toggle(a.id)}
+                  />
+                </TableCell>
                 <TableCell className="font-medium">{a.hostname}</TableCell>
                 <TableCell className="max-w-40 truncate text-muted">{a.memo ?? "—"}</TableCell>
                 <TableCell className="text-muted">

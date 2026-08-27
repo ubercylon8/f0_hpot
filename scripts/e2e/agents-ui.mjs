@@ -102,7 +102,50 @@ try {
       .getByRole("button", { name: "delete" })
       .click();
     await page.waitForSelector(`text=token "e2e-install-${RUN}" deleted`);
+    // OS picker changes the one-liner accordingly
+    await dialog.getByRole("combobox").first().click();
+    await page.getByRole("option", { name: "Windows · amd64" }).click();
+    await dialog.locator('code:has-text("iwr -Uri")').waitFor();
+    await dialog.locator('code:has-text("f0-deception-agent-windows-amd64.exe")').waitFor();
+    if ((await dialog.locator('code:has-text("--install")').count()) !== 0) {
+      throw new Error("windows one-liner must not use --install (service stub)");
+    }
+    await dialog.getByRole("combobox").first().click();
+    await page.getByRole("option", { name: "macOS · Apple Silicon" }).click();
+    await dialog.locator('code:has-text("f0-deception-agent-darwin-arm64")').waitFor();
+    await dialog.locator('code:has-text("--install")').waitFor();
     await page.keyboard.press("Escape");
+  });
+
+  await check("fleet bulk retire: select two agents and retire permanently", async () => {
+    const mk = async (h) => {
+      const r = await fetch(`${process.env.F0_E2E_API ?? "http://127.0.0.1:18443"}/api/v1/agent/enroll`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enrollment_token: process.env.F0_E2E_ENROLL ?? "demo-enroll-token",
+          hostname: h,
+          platform: "linux/amd64",
+        }),
+      });
+      return r.json();
+    };
+    const h1 = `e2e-bulk-a-${RUN}`;
+    const h2 = `e2e-bulk-b-${RUN}`;
+    await mk(h1);
+    await mk(h2);
+    await page.reload();
+    for (const h of [h1, h2]) {
+      await row(page, h).locator('input[type="checkbox"]').click();
+    }
+    await page.waitForSelector("text=2 selected");
+    await page.getByText("retire permanently…").click();
+    await page.getByRole("button", { name: "confirm retire permanently" }).click();
+    await page.waitForSelector("text=2 agent(s) retired");
+    await page.waitForTimeout(800);
+    for (const h of [h1, h2]) {
+      if ((await row(page, h).count()) !== 0) throw new Error(`${h} still in table`);
+    }
   });
 
   await check("drawer: memo edit saves and shows in the fleet table", async () => {
