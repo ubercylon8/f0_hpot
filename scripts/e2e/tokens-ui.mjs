@@ -15,23 +15,21 @@
  * F0_E2E_API (http://127.0.0.1:18443), F0_E2E_GATEWAY
  * (http://localhost:18080), F0_E2E_CHROMIUM (/usr/bin/chromium).
  */
-import { chromium } from "playwright";
 import { createServer } from "node:http";
+import {
+  CONSOLE,
+  apiJson,
+  gwFetch,
+  launchBrowser,
+  loginPage,
+  makeReporter,
+  requireKey,
+  settle,
+  waitForIncident,
+} from "./lib.mjs";
 
-const CONSOLE = process.env.F0_E2E_CONSOLE ?? "http://localhost:5173";
-const API = process.env.F0_E2E_API ?? "http://127.0.0.1:18443";
-const GATEWAY = process.env.F0_E2E_GATEWAY ?? "http://localhost:18080";
-const KEY = process.env.F0_E2E_KEY;
-if (!KEY) {
-  console.error("F0_E2E_KEY (console API key) is required");
-  process.exit(2);
-}
-
-const results = [];
-function report(type, ok, note = "") {
-  results.push({ type, ok, note });
-  console.log(`${ok ? "PASS" : "FAIL"}  ${type}${note ? ` — ${note}` : ""}`);
-}
+requireKey();
+const { report, summarize } = makeReporter();
 
 /** Chrome mutates suggested filenames: leading dots are stripped from
  *  dotfiles and ".txt" is appended to extension-less text/plain files. */
@@ -50,15 +48,6 @@ function downloadNamesMatch(expected, actual) {
   );
 }
 
-/** Wait for radix dialogs/sheets to finish closing before continuing. */
-async function settle(page) {
-  await page
-    .waitForFunction(() => !document.querySelector('[data-state="open"]'), null, {
-      timeout: 3000,
-    })
-    .catch(() => {});
-}
-
 /** Tiny static site used as the cloned_website target. */
 function startCloneSite() {
   const srv = createServer((_req, res) => {
@@ -68,32 +57,6 @@ function startCloneSite() {
   return new Promise((resolve) => {
     srv.listen(0, "127.0.0.1", () => resolve({ srv, port: srv.address().port }));
   });
-}
-
-async function apiJson(path, init = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      ...(init.body ? { "content-type": "application/json" } : {}),
-      authorization: `Bearer ${KEY}`,
-    },
-  });
-  if (!res.ok) throw new Error(`${path}: ${res.status}`);
-  return res.json();
-}
-
-async function gwFetch(path, redirect = "manual") {
-  return fetch(`${GATEWAY}${path}`, { redirect });
-}
-
-/** Incident appears within ~3s (gateway forwards asynchronously). */
-async function waitForIncident(tokenId) {
-  for (let i = 0; i < 10; i++) {
-    const rows = await apiJson(`/api/v1/tokens/${tokenId}/incidents`);
-    if (rows.length > 0) return true;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return false;
 }
 
 const PNG_1PX = Buffer.from(
@@ -238,17 +201,9 @@ async function testType(page, t, clonePort) {
 }
 
 const { srv: cloneSrv, port: clonePort } = await startCloneSite();
-const browser = await chromium.launch({
-  ...(process.env.F0_E2E_CHROMIUM !== "bundled"
-    ? { executablePath: process.env.F0_E2E_CHROMIUM ?? "/usr/bin/chromium" }
-    : {}),
-});
+const browser = await launchBrowser();
 try {
-  const ctx = await browser.newContext({ acceptDownloads: true });
-  const page = await ctx.newPage();
-  page.setDefaultTimeout(10_000);
-  await page.goto(CONSOLE);
-  await page.evaluate((k) => localStorage.setItem("f0_api_key", k), KEY);
+  const page = await loginPage(browser);
   await page.goto(`${CONSOLE}/tokens`);
   await page.waitForSelector("text=New token");
 
@@ -260,6 +215,4 @@ try {
   cloneSrv.close();
 }
 
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} token types passed`);
-if (failed.length > 0) process.exit(1);
+if (summarize("token types") > 0) process.exit(1);
