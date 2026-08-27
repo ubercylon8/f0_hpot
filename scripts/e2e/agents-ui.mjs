@@ -89,6 +89,18 @@ try {
     await dialog.locator(`code:has-text("${enroll}")`).waitFor();
     await dialog.locator(`code:has-text("--install")`).waitFor();
     await dialog.getByTitle("copy one-liner").waitFor();
+    // create a managed per-install token: the one-liner adopts it
+    await dialog.getByPlaceholder("label (e.g. dmz-host-01 install)").fill(`e2e-install-${RUN}`);
+    await dialog.getByRole("button", { name: "create token" }).click();
+    await page.waitForSelector(`text=enrollment token "e2e-install-${RUN}" created`);
+    await dialog.locator('code:has-text("f0et_")').waitFor();
+    await dialog.locator(`text=using new token "e2e-install-${RUN}"`).waitFor();
+    // delete it from the managed list
+    await dialog
+      .locator("div.flex.items-center.gap-3", { hasText: `e2e-install-${RUN}` })
+      .getByRole("button", { name: "delete" })
+      .click();
+    await page.waitForSelector(`text=token "e2e-install-${RUN}" deleted`);
     await page.keyboard.press("Escape");
   });
 

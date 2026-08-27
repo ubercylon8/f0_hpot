@@ -2,8 +2,10 @@ import { describe, it, expect, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { eq } from "drizzle-orm";
 import { dashboardStatsSchema } from "@f0/deception-shared";
 import { buildServer } from "./server.js";
+import { enrollmentTokens } from "./db/schema.js";
 
 const ENV_VARS = ["F0_ADMIN_TOKEN", "F0_INTERNAL_SECRET", "F0_ENROLLMENT_TOKEN"] as const;
 
@@ -441,6 +443,98 @@ describe("fleet + dashboard API", () => {
       expect((await filesOf((res.json() as { id: string }).id))[0]?.filename).toBe(
         "quarterly_report.docx",
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("managed enrollment tokens: create, enroll, track, expire, delete", async () => {
+    delete process.env.F0_ADMIN_TOKEN;
+    delete process.env.F0_INTERNAL_SECRET;
+    const { app, db } = buildServer({ dbPath: ":memory:" });
+    await app.ready();
+    try {
+      // create
+      let res = await app.inject({
+        method: "POST",
+        url: "/api/v1/enrollment-tokens",
+        payload: { label: "dc-rack-3 install" },
+      });
+      expect(res.statusCode).toBe(201);
+      const created = res.json() as { id: string; token: string };
+      expect(created.token.startsWith("f0et_")).toBe(true);
+
+      // enroll with it works
+      let enroll = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/enroll",
+        payload: {
+          enrollment_token: created.token,
+          hostname: "etok-host",
+          platform: "linux/amd64",
+        },
+      });
+      expect(enroll.statusCode).toBe(201);
+
+      // usage tracked
+      const list = (
+        await app.inject({ method: "GET", url: "/api/v1/enrollment-tokens" })
+      ).json() as { id: string; uses: number; lastUsedAt: string | null }[];
+      const row = list.find((t) => t.id === created.id);
+      expect(row?.uses).toBe(1);
+      expect(row?.lastUsedAt).toBeTruthy();
+
+      // expired tokens are rejected (force expiry in the past)
+      res = await app.inject({
+        method: "POST",
+        url: "/api/v1/enrollment-tokens",
+        payload: { label: "expiring", expires_in_hours: 1 },
+      });
+      const expiring = res.json() as { id: string; token: string };
+      db.update(enrollmentTokens)
+        .set({ expiresAt: new Date(Date.now() - 1000).toISOString() })
+        .where(eq(enrollmentTokens.id, expiring.id))
+        .run();
+      enroll = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/enroll",
+        payload: {
+          enrollment_token: expiring.token,
+          hostname: "etok-expired",
+          platform: "linux/amd64",
+        },
+      });
+      expect(enroll.statusCode).toBe(401);
+
+      // delete -> no longer valid
+      res = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/enrollment-tokens/${created.id}`,
+      });
+      expect(res.statusCode).toBe(200);
+      enroll = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/enroll",
+        payload: {
+          enrollment_token: created.token,
+          hostname: "etok-deleted",
+          platform: "linux/amd64",
+        },
+      });
+      expect(enroll.statusCode).toBe(401);
+
+      // env bootstrap token is unaffected and still works
+      process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+      enroll = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/enroll",
+        payload: {
+          enrollment_token: "enroll-token",
+          hostname: "etok-env",
+          platform: "linux/amd64",
+        },
+      });
+      expect(enroll.statusCode).toBe(201);
     } finally {
       await app.close();
     }

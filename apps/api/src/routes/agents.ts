@@ -6,6 +6,7 @@ import type { Db } from "../db/index.js";
 import { agents, agentSensors } from "../db/schema.js";
 import { newId } from "../ids.js";
 import { hashAgentKey, verifyAgentKey } from "../auth.js";
+import { consumeEnrollmentToken } from "../enrollment.js";
 
 const SENSOR_CONFIG_SCHEMA = z.array(
   z.object({
@@ -32,7 +33,11 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
     const expected = process.env.F0_ENROLLMENT_TOKEN;
-    if (!expected || parsed.data.enrollment_token !== expected) {
+    const presented = parsed.data.enrollment_token;
+    const valid =
+      (expected !== undefined && expected !== "" && presented === expected) ||
+      consumeEnrollmentToken(db, presented);
+    if (!valid) {
       return reply.unauthorized("invalid enrollment token");
     }
 

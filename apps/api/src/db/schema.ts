@@ -126,6 +126,19 @@ export const releaseKeys = sqliteTable("release_keys", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const enrollmentTokens = sqliteTable("enrollment_tokens", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  // sha256 of the raw token (f0et_…), shown once at creation.
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: text("expires_at"),
+  lastUsedAt: text("last_used_at"),
+  uses: integer("uses").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const codeSigningCerts = sqliteTable("code_signing_certs", {
   id: text("id").primaryKey(),
   label: text("label").notNull(),

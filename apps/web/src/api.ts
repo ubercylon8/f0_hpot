@@ -141,6 +141,15 @@ export interface ReleaseKeyRow {
   createdAt: string;
 }
 
+export interface EnrollmentTokenRow {
+  id: string;
+  label: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  uses: number;
+  createdAt: string;
+}
+
 export interface CodeSignCertRow {
   id: string;
   label: string;
@@ -281,6 +290,19 @@ export const api = {
     request(`/agent-releases/${encodeURIComponent(file)}`, { method: "DELETE" }),
   listAgents: () => request<AgentRow[]>("/agents"),
   getAgentBootstrap: () => request<{ enrollmentToken: string | null }>("/agent-bootstrap"),
+  listEnrollmentTokens: () => request<EnrollmentTokenRow[]>("/enrollment-tokens"),
+  createEnrollmentToken: (label: string, expiresInHours?: number) =>
+    request<{ id: string; label: string; token: string; expiresAt: string | null }>(
+      "/enrollment-tokens",
+      {
+        method: "POST",
+        body: JSON.stringify(
+          expiresInHours ? { label, expires_in_hours: expiresInHours } : { label },
+        ),
+      },
+    ),
+  deleteEnrollmentToken: (id: string) =>
+    request(`/enrollment-tokens/${id}`, { method: "DELETE" }),
   patchAgent: (id: string, memo: string | null) =>
     request(`/agents/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Hammer, KeyRound, Plus, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, downloadFile, type AgentRow, type CodeSignCertRow, type ReleaseKeyRow } from "../api.js";
+import { api, downloadFile, type AgentRow, type CodeSignCertRow, type EnrollmentTokenRow, type ReleaseKeyRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -59,10 +59,33 @@ function OnlineDot({ agent }: { agent: AgentRow }) {
 }
 
 function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [token, setToken] = useState<string | null>(null);
+  const [bootstrap, setBootstrap] = useState<string | null>(null);
+  const [managed, setManaged] = useState<EnrollmentTokenRow[]>([]);
+  const [fresh, setFresh] = useState<{ id: string; token: string; label: string } | null>(null);
+  const [label, setLabel] = useState("");
+  const [expires, setExpires] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => {
+    api.getAgentBootstrap().then((b) => setBootstrap(b.enrollmentToken)).catch(() => {});
+    api.listEnrollmentTokens().then(setManaged).catch(() => setManaged([]));
+  };
   useEffect(() => {
-    if (open) api.getAgentBootstrap().then((b) => setToken(b.enrollmentToken)).catch(() => {});
+    if (open) {
+      setFresh(null);
+      reload();
+    }
   }, [open]);
+
+  // The one-liner uses the freshly created token if there is one (older
+  // managed tokens are hash-only server-side, so they can't be embedded);
+  // otherwise the env bootstrap token.
+  const token = fresh?.token ?? bootstrap;
+  const tokenNote = fresh
+    ? `using new token "${fresh.label}" (shown now — store it)`
+    : bootstrap
+      ? "using the F0_ENROLLMENT_TOKEN bootstrap value"
+      : null;
 
   const origin = window.location.origin;
   const oneLiner = token
@@ -71,9 +94,30 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
       `sudo ./f0-deception-agent-linux-amd64 --server ${origin} --enroll ${token} --install`
     : null;
 
+  async function create() {
+    if (!label.trim()) {
+      toast.error("label is required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const hours = expires.trim() ? Number(expires.trim()) : undefined;
+      const created = await api.createEnrollmentToken(label.trim(), hours);
+      setFresh(created);
+      setLabel("");
+      setExpires("");
+      toast.success(`enrollment token "${created.label}" created`);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-accent" /> Add an agent
@@ -83,26 +127,91 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
             the matching binary from the releases card and use the same flags.
           </DialogDescription>
         </DialogHeader>
-        {oneLiner ? (
-          <div className="space-y-3">
-            <div className="flex items-start gap-2 rounded-md border border-border bg-background p-3">
-              <code className="min-w-0 flex-1 break-all font-mono text-xs text-accent">
-                {oneLiner}
-              </code>
-              <CopyButton value={oneLiner} label="copy one-liner" />
+        <div className="space-y-4">
+          {oneLiner ? (
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2 rounded-md border border-border bg-background p-3">
+                <code className="min-w-0 flex-1 break-all font-mono text-xs text-accent">
+                  {oneLiner}
+                </code>
+                <CopyButton value={oneLiner} label="copy one-liner" />
+              </div>
+              <p className="text-xs text-faint">{tokenNote}</p>
             </div>
-            <p className="text-xs text-faint">
-              The enrollment token authenticates the host once; the agent receives
-              its own key at enrollment. Re-running with the same hostname
-              re-keys the existing agent.
+          ) : (
+            <p className="text-sm text-warning">
+              No enrollment token available — create one below (or set
+              F0_ENROLLMENT_TOKEN on the API).
             </p>
+          )}
+
+          <div className="space-y-2 border-t border-border pt-3">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-faint">
+              new enrollment token (per-install, revocable)
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                placeholder="label (e.g. dmz-host-01 install)"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                className="h-8 min-w-48 flex-1"
+              />
+              <Input
+                placeholder="expires in hours (optional)"
+                value={expires}
+                onChange={(e) => setExpires(e.target.value)}
+                className="h-8 w-44"
+              />
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void create()}>
+                <Plus className="h-3.5 w-3.5" />
+                {busy ? "creating…" : "create token"}
+              </Button>
+            </div>
           </div>
-        ) : (
-          <p className="text-sm text-warning">
-            F0_ENROLLMENT_TOKEN is not set on the API — agent enrollment is
-            disabled. Set it and restart the API.
+
+          <div className="space-y-1.5 border-t border-border pt-3">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-faint">
+              managed tokens
+            </p>
+            {managed.length === 0 && (
+              <p className="text-xs text-faint">None yet — per-install tokens you create appear here.</p>
+            )}
+            {managed.map((t) => (
+              <div key={t.id} className="flex items-center gap-3 text-xs">
+                <Badge variant="outline">{t.label}</Badge>
+                <span className="text-muted">
+                  {t.uses} use(s)
+                  {t.lastUsedAt ? ` · last ${timeAgo(t.lastUsedAt)}` : ""}
+                  {t.expiresAt ? ` · expires ${new Date(t.expiresAt).toLocaleDateString()}` : ""}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto text-danger hover:text-danger"
+                  onClick={() =>
+                    void api
+                      .deleteEnrollmentToken(t.id)
+                      .then(() => {
+                        toast.success(`token "${t.label}" deleted`);
+                        reload();
+                      })
+                      .catch((err: unknown) =>
+                        toast.error(err instanceof Error ? err.message : String(err)),
+                      )
+                  }
+                >
+                  delete
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-faint">
+            The enrollment token authenticates the host once; the agent receives
+            its own key at enrollment. Re-running with the same hostname re-keys
+            the existing agent.
           </p>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );

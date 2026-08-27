@@ -102,6 +102,16 @@ export function migrate(db: Db): void {
       passphrase TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS enrollment_tokens (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      expires_at TEXT,
+      last_used_at TEXT,
+      uses INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Additive column migrations (SQLite has no IF NOT EXISTS for columns).
