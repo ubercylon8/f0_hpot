@@ -29,6 +29,20 @@ async function makeServer(): Promise<FastifyInstance> {
   return app;
 }
 
+function rcodesignPath(): string {
+  try {
+    const out = execFileSync("which", ["rcodesign"], { encoding: "utf8" }).trim();
+    if (out) return out;
+  } catch {
+    /* fall through */
+  }
+  return `${process.env.HOME}/.cargo/bin/rcodesign`;
+}
+
+function hasRcodesign(): boolean {
+  return existsSync(rcodesignPath());
+}
+
 async function generateCert(app: FastifyInstance, label = "test-cert") {
   const res = await app.inject({
     method: "POST",
@@ -164,10 +178,19 @@ describe("code signing (Authenticode)", () => {
         "-inkey", `${certDir}/k.pem`, "-in", `${certDir}/c.pem`,
         "-passout", "pass:test-pass",
       ]);
-      // Sign a temp COPY — never mutate the repo binary.
+      // Sign temp COPIES — never mutate the repo binaries.
       const dir = mkdtempSync(path.join(tmpdir(), "f0-sign-test-"));
       const exe = path.join(dir, "f0-deception-agent-windows-amd64.exe");
       copyFileSync(repoExe, exe);
+      const repoBin = path.resolve("../../agent/bin");
+      for (const extra of [
+        "f0-deception-agent-darwin-amd64",
+        "f0-deception-agent-linux-amd64",
+      ]) {
+        if (existsSync(path.join(repoBin, extra))) {
+          copyFileSync(path.join(repoBin, extra), path.join(dir, extra));
+        }
+      }
       process.env.F0_AGENT_RELEASE_DIR = dir;
       const app = await makeServer();
       try {
@@ -189,6 +212,10 @@ describe("code signing (Authenticode)", () => {
           payload: { certId },
         });
         expect(res.statusCode).toBe(200);
+        const report = res.json() as { signed: string[]; skipped: string[] };
+        expect(report.signed).toContain("f0-deception-agent-windows-amd64.exe");
+        // Linux has no OS-level signing — it must be skipped, not touched.
+        expect(report.skipped).toContain("f0-deception-agent-linux-amd64");
         // Signed whether or not the input was already signed (re-sign
         // replaces the signature, so size is not a reliable signal).
         execFileSync("osslsigncode", [
@@ -199,6 +226,14 @@ describe("code signing (Authenticode)", () => {
           "verify", "-CAfile", `${certDir}/c.pem`, exe,
         ]).toString();
         expect(out.toLowerCase()).toContain("signature verification: ok");
+
+        // Mach-O got rcodesign-signed with the same cert (when rcodesign
+        // is available on this host).
+        if (hasRcodesign()) {
+          const darwin = path.join(dir, "f0-deception-agent-darwin-amd64");
+          expect(report.signed).toContain("f0-deception-agent-darwin-amd64");
+          execFileSync(rcodesignPath(), ["verify", darwin]);
+        }
       } finally {
         rmSync(dir, { recursive: true, force: true });
         rmSync(certDir, { recursive: true, force: true });

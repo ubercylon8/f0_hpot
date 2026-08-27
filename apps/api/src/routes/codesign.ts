@@ -6,7 +6,7 @@ import {
   deleteCodeSignCert,
   generateCodeSignCert,
   listCodeSignCerts,
-  signReleaseExe,
+  signReleaseBinaries,
   storeUploadedCodeSignCert,
 } from "../codesign.js";
 
@@ -64,10 +64,7 @@ export function registerCodeSignRoutes(app: FastifyInstance, db: Db): void {
 
   app.post("/api/v1/agent-releases/codesign", async (request, reply) => {
     const parsed = z
-      .object({
-        certId: z.string().min(1),
-        file: z.string().max(120).optional(),
-      })
+      .object({ certId: z.string().min(1) })
       .safeParse(request.body);
     if (!parsed.success) {
       return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
@@ -77,9 +74,10 @@ export function registerCodeSignRoutes(app: FastifyInstance, db: Db): void {
       return reply.badRequest("F0_AGENT_RELEASE_DIR is not set or missing");
     }
     try {
-      const result = await signReleaseExe(db, parsed.data.certId, dir, parsed.data.file);
+      const result = await signReleaseBinaries(db, parsed.data.certId, dir);
       app.log.warn(
-        `agent binary ${result.file} Authenticode-signed with cert ${parsed.data.certId}`,
+        `release binaries signed with cert ${parsed.data.certId}: ` +
+          `${result.signed.join(", ")}${result.skipped.length ? ` (skipped: ${result.skipped.join(", ")})` : ""}`,
       );
       return reply.send({ ok: true, ...result });
     } catch (err) {

@@ -141,6 +141,26 @@ try {
     if (size < 1_000_000) throw new Error(`suspiciously small binary: ${size}`);
   });
 
+  await check("build with version + delete binaries from the UI", async () => {
+    const row = page
+      .locator("span.font-mono", { hasText: "f0-deception-agent-darwin-arm64" })
+      .locator("..");
+    await row.getByTitle(/delete /).click();
+    await page.waitForSelector("text=deleted f0-deception-agent-darwin-arm64");
+    // span.font-mono scopes out the toast text itself
+    if ((await page.locator("span.font-mono", { hasText: "f0-deception-agent-darwin-arm64" }).count()) !== 0) {
+      throw new Error("file row still visible after delete");
+    }
+    await page.getByPlaceholder("v1.0.0").fill(`v-e2e-${RUN}`);
+    await page.getByRole("button", { name: "build binaries" }).click();
+    await page.waitForSelector("text=built 5 binaries", { timeout: 180_000 });
+    await page.locator("span.font-mono", { hasText: "f0-deception-agent-darwin-arm64" }).first().waitFor();
+    // the stale manifest must be cleared by the rebuild
+    if ((await page.locator("text=signed release manifest present").count()) !== 0) {
+      throw new Error("manifest badge still visible after rebuild");
+    }
+  });
+
   await check("signing keys: generate, list, and sign the release dir", async () => {
     await page.getByPlaceholder("key label (e.g. prod-2026)").fill(KEY_LABEL);
     await page.getByRole("button", { name: "generate key" }).click();
@@ -182,10 +202,8 @@ try {
     await card.getByRole("button", { name: "generate", exact: true }).click();
     await page.waitForSelector(`text=certificate "${certLabel}" generated`);
     const certRow = card.locator("div.flex.items-center.gap-3", { hasText: certLabel });
-    await certRow.getByRole("button", { name: "sign .exe" }).click();
-    await page.waitForSelector("text=signed f0-deception-agent-windows-amd64.exe", {
-      timeout: 30_000,
-    });
+    await certRow.getByRole("button", { name: "sign binaries" }).click();
+    await page.waitForSelector("text=signed 3 binary(ies)", { timeout: 60_000 });
     // The PE must now carry an extractable Authenticode signature.
     const exe = path.join(RELEASE_DIR, "f0-deception-agent-windows-amd64.exe");
     const sigDir = mkdtempSync(path.join(tmpdir(), "f0-sig-"));
@@ -194,6 +212,11 @@ try {
       execFileSync("osslsigncode", ["extract-signature", "-in", exe, "-out", out]);
       if (!existsSync(out) || statSync(out).size < 100) {
         throw new Error("no signature found in the signed exe");
+      }
+      // Both Mach-O binaries must verify under rcodesign.
+      const rc = process.env.F0_RCODESIGN ?? `${process.env.HOME}/.cargo/bin/rcodesign`;
+      for (const f of ["f0-deception-agent-darwin-amd64", "f0-deception-agent-darwin-arm64"]) {
+        execFileSync(rc, ["verify", path.join(RELEASE_DIR, f)]);
       }
     } finally {
       rmSync(sigDir, { recursive: true, force: true });

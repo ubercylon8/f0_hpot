@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Plus, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
+import { Hammer, KeyRound, Plus, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, downloadFile, type AgentRow, type CodeSignCertRow, type ReleaseKeyRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
@@ -219,8 +219,10 @@ function SigningKeysCard() {
 function ReleasesCard() {
   const [files, setFiles] = useState<{ filename: string; size: number; url: string }[]>([]);
   const [manifest, setManifest] = useState<string | null>(null);
+  const [version, setVersion] = useState("v1.0.0");
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const reload = () =>
     api
       .listReleases()
       .then((r) => {
@@ -228,25 +230,59 @@ function ReleasesCard() {
         setManifest(r.manifest);
       })
       .catch(() => {});
+  useEffect(() => {
+    void reload();
   }, []);
+
+  async function build() {
+    if (!version.trim()) {
+      toast.error("version is required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.buildReleases(version.trim());
+      toast.success(`built ${r.files.length} binaries at ${r.version} — manifest cleared, re-sign to publish`);
+      void reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Release binaries</CardTitle>
         <CardDescription>
-          Built with <code className="font-mono text-muted">cd agent && make release</code>,
-          served from <code className="font-mono text-muted">F0_AGENT_RELEASE_DIR</code>
+          Cross-compiled for 5 platforms, served from{" "}
+          <code className="font-mono text-muted">F0_AGENT_RELEASE_DIR</code>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2 pb-2">
+          <Input
+            placeholder="v1.0.0"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            className="h-8 w-36 font-mono"
+          />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void build()}>
+            <Hammer className="h-3.5 w-3.5" />
+            {busy ? "building…" : "build binaries"}
+          </Button>
+          {busy && (
+            <span className="text-xs text-faint">cross-compiling 5 platforms, ~1 min</span>
+          )}
+        </div>
         {files.length === 0 ? (
           <p className="text-xs text-faint">No release binaries found.</p>
         ) : (
           files.map((f) => (
             <div key={f.filename} className="flex items-center justify-between text-sm">
               <span className="font-mono text-xs">{f.filename}</span>
-              <span className="flex items-center gap-3 text-xs text-muted">
+              <span className="flex items-center gap-2 text-xs text-muted">
                 {(f.size / 1e6).toFixed(1)} MB
                 <Button
                   variant="outline"
@@ -260,6 +296,25 @@ function ReleasesCard() {
                   }
                 >
                   download
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-danger hover:text-danger"
+                  title={`delete ${f.filename}`}
+                  onClick={() =>
+                    void api
+                      .deleteRelease(f.filename)
+                      .then(() => {
+                        toast.success(`deleted ${f.filename}`);
+                        void reload();
+                      })
+                      .catch((err: unknown) =>
+                        toast.error(err instanceof Error ? err.message : String(err)),
+                      )
+                  }
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </span>
             </div>
@@ -348,14 +403,19 @@ function CodeSigningCard() {
                 setBusy(true);
                 void api
                   .codeSignRelease(c.id)
-                  .then((r) => toast.success(`signed ${r.file} with ${c.label}`))
+                  .then((r) =>
+                    toast.success(
+                      `signed ${r.signed.length} binary(ies) with ${c.label}` +
+                        (r.skipped.length ? ` — skipped: ${r.skipped.join(", ")}` : ""),
+                    ),
+                  )
                   .catch((err: unknown) =>
                     toast.error(err instanceof Error ? err.message : String(err)),
                   )
                   .finally(() => setBusy(false));
               }}
             >
-              sign .exe
+              sign binaries
             </Button>
             <Button
               size="sm"

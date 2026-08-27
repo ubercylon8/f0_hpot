@@ -258,6 +258,13 @@ export const api = {
     request<{ files: { filename: string; size: number; url: string }[]; manifest: string | null }>(
       "/agent-releases",
     ),
+  buildReleases: (version: string) =>
+    request<{ ok: boolean; version: string; files: { filename: string; size: number }[] }>(
+      "/agent-releases/build",
+      { method: "POST", body: JSON.stringify({ version }) },
+    ),
+  deleteRelease: (file: string) =>
+    request(`/agent-releases/${encodeURIComponent(file)}`, { method: "DELETE" }),
   listAgents: () => request<AgentRow[]>("/agents"),
   getAgentBootstrap: () => request<{ enrollmentToken: string | null }>("/agent-bootstrap"),
   patchAgent: (id: string, memo: string | null) =>
@@ -287,7 +294,7 @@ export const api = {
     }),
   deleteCodeSignCert: (id: string) => request(`/codesign-certs/${id}`, { method: "DELETE" }),
   codeSignRelease: (certId: string) =>
-    request<{ ok: boolean; file: string }>("/agent-releases/codesign", {
+    request<{ ok: boolean; signed: string[]; skipped: string[] }>("/agent-releases/codesign", {
       method: "POST",
       body: JSON.stringify({ certId }),
     }),

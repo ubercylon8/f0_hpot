@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   copyFileSync,
@@ -9,13 +9,41 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { X509Certificate } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Db } from "./db/index.js";
 import { codeSigningCerts } from "./db/schema.js";
 import { newId } from "./ids.js";
+
+/**
+ * Resolve a signing tool binary: env override, then PATH, then the
+ * user's cargo bin (where `cargo install apple-codesign` lands).
+ */
+function resolveTool(name: string): string {
+  const envOverride = process.env[`F0_${name.toUpperCase()}`];
+  const candidates = [
+    ...(envOverride ? [envOverride] : []),
+    name,
+    path.join(homedir(), ".cargo", "bin", name),
+  ];
+  for (const c of candidates) {
+    if (c.includes("/") && existsSync(c)) return c;
+    if (!c.includes("/")) {
+      // PATH lookup via the shell's which (cheap, startup-time only).
+      try {
+        const out = execFileSync("which", [c], { encoding: "utf8" }).trim();
+        if (out) return out;
+      } catch {
+        /* not on PATH */
+      }
+    }
+  }
+  throw new Error(
+    `${name} not found — install it (rcodesign: cargo install apple-codesign) or set F0_${name.toUpperCase()}`,
+  );
+}
 
 /**
  * Authenticode code signing of agent binaries.
@@ -34,15 +62,27 @@ import { newId } from "./ids.js";
 
 const execFileAsync = promisify(execFile);
 
-async function run(cmd: string, args: string[]): Promise<string> {
+interface RunOpts {
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}
+
+async function run(cmd: string, args: string[], opts: RunOpts = {}): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 16 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(cmd, args, {
+      maxBuffer: 16 * 1024 * 1024,
+      ...(opts.env ? { env: opts.env } : {}),
+      ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    });
     return stdout;
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr?.trim();
     throw new Error(stderr ? `${cmd}: ${stderr.split("\n").pop()}` : String(err));
   }
 }
+
+/** Shell-out wrapper shared with release-build (execFile, arg arrays). */
+export { run as runTool };
 
 /** mkdtemp + guaranteed cleanup for sensitive intermediate files. */
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -146,44 +186,15 @@ export async function storeUploadedCodeSignCert(
 }
 
 export const WINDOWS_EXE_RE = /^f0-deception-agent-[a-z0-9.-]+\.exe$/;
+export const MACHO_RE = /^f0-deception-agent-darwin-(amd64|arm64)$/;
 
-/**
- * Authenticode-sign a Windows release binary in-place with a stored cert
- * (signed copy is verified before replacing the original).
- */
-export async function signReleaseExe(
-  db: Db,
-  certId: string,
+async function signWindowsExe(
+  cert: typeof codeSigningCerts.$inferSelect,
   releaseDir: string,
-  filename?: string,
-): Promise<{ file: string }> {
-  const cert = db
-    .select()
-    .from(codeSigningCerts)
-    .where(eq(codeSigningCerts.id, certId))
-    .get();
-  if (!cert) throw new Error("unknown certId");
-
-  const target =
-    filename ??
-    (() => {
-      const exes = readdirSync(releaseDir).filter((f) => WINDOWS_EXE_RE.test(f));
-      if (exes.length !== 1) {
-        throw new Error(
-          exes.length === 0
-            ? "no Windows .exe in the release dir"
-            : "multiple .exe files — specify which one to sign",
-        );
-      }
-      return exes[0]!;
-    })();
-  if (!WINDOWS_EXE_RE.test(target)) {
-    throw new Error("only f0-deception-agent-*.exe binaries can be signed");
-  }
+  target: string,
+): Promise<void> {
   const exePath = path.join(releaseDir, target);
-  if (!existsSync(exePath)) throw new Error(`${target} not found in the release dir`);
-
-  return withTempDir(async (dir) => {
+  await withTempDir(async (dir) => {
     const p12 = path.join(dir, "cert.p12");
     writeFileSync(p12, Buffer.from(cert.pfx, "base64"), { mode: 0o600 });
     // osslsigncode verify chains against the system trust store; an
@@ -205,10 +216,97 @@ export async function signReleaseExe(
       "-in", signedPath,
       "-out", `${signedPath}.signed`,
     ]);
-    // Verify the signature is structurally valid before trusting it.
     await run("osslsigncode", ["verify", "-CAfile", caPath, `${signedPath}.signed`]);
     // copyFileSync, not rename: the release dir may be on another fs (EXDEV).
     copyFileSync(`${signedPath}.signed`, exePath);
-    return { file: target };
   });
+}
+
+async function signMachO(
+  cert: typeof codeSigningCerts.$inferSelect,
+  releaseDir: string,
+  target: string,
+  rcodesign: string,
+): Promise<void> {
+  const binPath = path.join(releaseDir, target);
+  await withTempDir(async (dir) => {
+    const p12 = path.join(dir, "cert.p12");
+    writeFileSync(p12, Buffer.from(cert.pfx, "base64"), { mode: 0o600 });
+    // rcodesign wants PEM cert chain + key (not a p12 bundle).
+    const certPem = await run("openssl", [
+      "pkcs12", "-in", p12, "-clcerts", "-nokeys",
+      "-passin", `pass:${cert.passphrase}`,
+    ]);
+    const keyPem = await run("openssl", [
+      "pkcs12", "-in", p12, "-nocerts", "-nodes",
+      "-passin", `pass:${cert.passphrase}`,
+    ]);
+    const certPath = path.join(dir, "cert.pem");
+    const keyPath = path.join(dir, "key.pem");
+    writeFileSync(certPath, certPem, { mode: 0o600 });
+    writeFileSync(keyPath, keyPem, { mode: 0o600 });
+    const signedPath = path.join(dir, target);
+    copyFileSync(binPath, signedPath);
+    await run(rcodesign, [
+      "sign",
+      "--pem-file", keyPath,
+      "--pem-file", certPath,
+      signedPath,
+      `${signedPath}.signed`,
+    ]);
+    await run(rcodesign, ["verify", `${signedPath}.signed`]);
+    copyFileSync(`${signedPath}.signed`, binPath);
+  });
+}
+
+export interface SignReport {
+  signed: string[];
+  skipped: string[];
+}
+
+/**
+ * Sign every signable release binary in-place with a stored cert:
+ * Windows .exe via osslsigncode (Authenticode), darwin Mach-O via
+ * rcodesign. Linux binaries are skipped (no OS-level signing — the
+ * Ed25519 release manifest covers them).
+ */
+export async function signReleaseBinaries(
+  db: Db,
+  certId: string,
+  releaseDir: string,
+): Promise<SignReport> {
+  const cert = db
+    .select()
+    .from(codeSigningCerts)
+    .where(eq(codeSigningCerts.id, certId))
+    .get();
+  if (!cert) throw new Error("unknown certId");
+
+  const report: SignReport = { signed: [], skipped: [] };
+  // rcodesign is optional: without it, darwin binaries skip (not fail).
+  let rcodesign: string | null = null;
+  try {
+    rcodesign = resolveTool("rcodesign");
+  } catch {
+    rcodesign = null;
+  }
+  for (const name of readdirSync(releaseDir).sort()) {
+    if (WINDOWS_EXE_RE.test(name)) {
+      await signWindowsExe(cert, releaseDir, name);
+      report.signed.push(name);
+    } else if (MACHO_RE.test(name)) {
+      if (rcodesign) {
+        await signMachO(cert, releaseDir, name, rcodesign);
+        report.signed.push(name);
+      } else {
+        report.skipped.push(name);
+      }
+    } else if (name.startsWith("f0-deception-agent-")) {
+      report.skipped.push(name);
+    }
+  }
+  if (report.signed.length === 0 && report.skipped.length === 0) {
+    throw new Error("no release binaries found in the release dir");
+  }
+  return report;
 }
