@@ -167,7 +167,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    // Fastify error bodies are JSON with a message field — surface that,
+    // not the raw blob (e.g. channel test failures).
+    let message = body;
+    try {
+      const parsed = JSON.parse(body) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch {
+      /* not JSON — use the raw body */
+    }
+    throw new Error(`${res.status}: ${message}`);
   }
   return (await res.json()) as T;
 }
