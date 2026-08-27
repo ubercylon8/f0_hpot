@@ -386,6 +386,60 @@ function ConfirmDelete({
   );
 }
 
+function CloneStatusCard({ token, onRecloned }: { token: TokenDetail; onRecloned: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const cfg = token.config;
+  const str = (k: string) => (typeof cfg[k] === "string" ? String(cfg[k]) : null);
+  const status = str("clone_status");
+  const error = str("clone_error");
+  const target = str("target_url") ?? "";
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Cloned page</h3>
+      <div className="space-y-2 rounded-md border border-border bg-background p-3 text-xs">
+        <div className="flex items-center gap-2">
+          {status === "ok" ? (
+            <Badge variant="accent">clone ok</Badge>
+          ) : status === "failed" ? (
+            <Badge variant="high">clone failed</Badge>
+          ) : (
+            <Badge variant="default">not cloned</Badge>
+          )}
+          <span className="min-w-0 flex-1 truncate font-mono text-muted">{target}</span>
+          <CopyButton value={target} label="copy target url" />
+        </div>
+        {error && <p className="text-danger">{error}</p>}
+        {status !== "ok" && (
+          <p className="text-faint">
+            {"The gateway 404s /<id>/site until a clone succeeds."}
+          </p>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void api
+              .recloneToken(token.id)
+              .then(() => toast.success("page re-cloned — gateway serves the fresh copy"))
+              .catch((err: unknown) =>
+                toast.error(err instanceof Error ? err.message : String(err)),
+              )
+              .finally(() => {
+                setBusy(false);
+                onRecloned();
+              });
+          }}
+        >
+          {busy ? "re-cloning…" : "re-clone now"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function TokenDrawer({
   tokenId,
   onClose,
@@ -396,11 +450,19 @@ function TokenDrawer({
   onChanged: () => void;
 }) {
   const [detail, setDetail] = useState<TokenDetail | null>(null);
+  const [memo, setMemo] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const refresh = () => {
-    if (tokenId) api.getToken(tokenId).then(setDetail).catch(() => setDetail(null));
+    if (tokenId)
+      api
+        .getToken(tokenId)
+        .then((d) => {
+          setDetail(d);
+          setMemo(d.memo ?? "");
+        })
+        .catch(() => setDetail(null));
   };
   useEffect(refresh, [tokenId]);
   useEffect(() => setConfirming(false), [tokenId]);
@@ -434,15 +496,38 @@ function TokenDrawer({
               </SheetDescription>
             </SheetHeader>
             <SheetBody className="space-y-5">
-              <div className="text-xs text-muted">
-                {detail.memo && <p className="mb-1 text-sm text-foreground">{detail.memo}</p>}
-                created {new Date(detail.createdAt).toLocaleString()} · {detail.hitCount ?? 0} hit(s)
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="memo — where is this planted?"
+                    value={memo}
+                    onChange={(e) => setMemo(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || memo === (detail.memo ?? "")}
+                    onClick={() =>
+                      void act(() => api.patchToken(detail.id, memo.trim() || null), "memo saved")
+                    }
+                  >
+                    save
+                  </Button>
+                </div>
+                <p className="text-xs text-muted">
+                  created {new Date(detail.createdAt).toLocaleString()} · {detail.hitCount ?? 0} hit(s)
+                </p>
               </div>
 
               <div className="space-y-2">
                 <h3 className="text-xs font-medium uppercase tracking-wider text-faint">Artifacts</h3>
                 <ArtifactsList artifacts={detail.artifacts ?? []} />
               </div>
+
+              {detail.type === "cloned_website" && (
+                <CloneStatusCard token={detail} onRecloned={() => { refresh(); onChanged(); }} />
+              )}
 
               {detail.type === "custom_image" && (
                 <ImageUploadCard token={detail} onUploaded={() => { refresh(); onChanged(); }} />

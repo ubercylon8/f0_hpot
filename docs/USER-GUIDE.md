@@ -89,7 +89,9 @@ when the hyperlink is clicked. PDF uses open-action/link (viewer dependent).
 ### Cloned website
 Give it a URL to clone (e.g. your VPN portal). You get a lookalike page on
 your infrastructure with an invisible beacon. Phish-test your users or watch
-for link-scrapers. Any visit = high severity.
+for link-scrapers. Any visit = high severity. The token's detail drawer
+shows the clone status — if the fetch failed or the target page changed,
+fix the target and hit **re-clone now** there.
 
 ### Windows folder
 Create a folder named exactly like the artifact shown (e.g.

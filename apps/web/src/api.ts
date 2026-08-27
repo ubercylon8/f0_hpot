@@ -185,6 +185,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+  patchToken: (id: string, memo: string | null) =>
+    request(`/tokens/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }),
+  recloneToken: (id: string) => request(`/tokens/${id}/reclone`, { method: "POST" }),
   uploadTokenImage: (id: string, image: { data: string; contentType: string; filename?: string }) =>
     request(`/tokens/${id}/image`, { method: "POST", body: JSON.stringify(image) }),
   listIncidents: (params: Record<string, string | undefined> = {}) => {

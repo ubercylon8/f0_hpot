@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dashboardStatsSchema } from "@f0/deception-shared";
 import { buildServer } from "./server.js";
 
@@ -283,6 +285,116 @@ describe("fleet + dashboard API", () => {
       expect((res.json() as { enrollmentToken: string | null }).enrollmentToken).toBeNull();
     } finally {
       await app2.close();
+    }
+  });
+
+  it("qr_code tokens get a downloadable PNG at creation (files/0)", async () => {
+    const app = await makeServer();
+    try {
+      const id = await createToken(app, "qr_code");
+      const detail = (
+        await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })
+      ).json() as {
+        artifacts: { kind: string; value: string }[];
+        files: { idx: number; filename: string; contentType: string }[];
+      };
+      expect(detail.files).toContainEqual({ idx: 0, filename: "qr.png", contentType: "image/png" });
+      const dlArtifact = detail.artifacts.find((a) => a.kind === "file_download");
+      expect(dlArtifact?.value.endsWith("/files/0")).toBe(true);
+      const dl = await app.inject({ method: "GET", url: `/api/v1/tokens/${id}/files/0` });
+      expect(dl.statusCode).toBe(200);
+      expect(dl.headers["content-type"]).toBe("image/png");
+      // PNG magic bytes.
+      expect(dl.rawPayload.subarray(0, 4).toString("hex")).toBe("89504e47");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("token memo is editable via PATCH /tokens/:id", async () => {
+    const app = await makeServer();
+    try {
+      const id = await createToken(app);
+      let res = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/tokens/${id}`,
+        payload: { memo: "planted in the wiki footer" },
+      });
+      expect(res.statusCode).toBe(200);
+      let detail = (
+        await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })
+      ).json() as { memo: string | null };
+      expect(detail.memo).toBe("planted in the wiki footer");
+      // null clears it again.
+      res = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/tokens/${id}`,
+        payload: { memo: null },
+      });
+      expect(res.statusCode).toBe(200);
+      detail = (
+        await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })
+      ).json() as { memo: string | null };
+      expect(detail.memo).toBeNull();
+      res = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/tokens/tok_missing",
+        payload: { memo: "x" },
+      });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("cloned_website: clone outcome is stamped in config; reclone works and failures surface", async () => {
+    // Tiny static site to clone.
+    const site = createHttpServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<html><body><h1>corp login</h1></body></html>");
+    });
+    await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+    const sitePort = (site.address() as AddressInfo).port;
+    const app = await makeServer();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens",
+        payload: {
+          type: "cloned_website",
+          config: { target_url: `http://127.0.0.1:${sitePort}/` },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const { id } = res.json() as { id: string };
+
+      let detail = (
+        await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })
+      ).json() as { config: Record<string, unknown>; files: { filename: string }[] };
+      expect(detail.config["clone_status"]).toBe("ok");
+      expect(detail.files.some((f) => f.filename === "cloned_page.html")).toBe(true);
+
+      // Re-clone succeeds against the live site.
+      let rc = await app.inject({ method: "POST", url: `/api/v1/tokens/${id}/reclone` });
+      expect(rc.statusCode).toBe(200);
+
+      // With the target down, re-clone reports the failure and stamps config.
+      await new Promise<void>((resolve) => site.close(() => resolve()));
+      rc = await app.inject({ method: "POST", url: `/api/v1/tokens/${id}/reclone` });
+      expect(rc.statusCode).toBe(400);
+      detail = (
+        await app.inject({ method: "GET", url: `/api/v1/tokens/${id}` })
+      ).json() as { config: Record<string, unknown>; files: { filename: string }[] };
+      expect(detail.config["clone_status"]).toBe("failed");
+      expect(typeof detail.config["clone_error"]).toBe("string");
+
+      // Re-clone is type-guarded.
+      const other = await createToken(app);
+      rc = await app.inject({ method: "POST", url: `/api/v1/tokens/${other}/reclone` });
+      expect(rc.statusCode).toBe(400);
+    } finally {
+      site.close();
+      await app.close();
     }
   });
 });

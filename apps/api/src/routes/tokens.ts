@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, like, inArray, type SQL } from "drizzle-orm";
+import QRCode from "qrcode";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -85,42 +86,37 @@ export function registerTokenRoutes(
         fileIdx += 1;
       }
 
+      // QR tokens: render the PNG at creation so it is downloadable from
+      // token_files (the artifact value points at /files/0). Encoding the
+      // trigger URL — scanning the QR visits it and fires the token.
+      if (def.id === "qr_code") {
+        const png = await QRCode.toBuffer(`${gatewayOriginFor(id)}/${id}/qr`, {
+          width: 512,
+          margin: 1,
+          errorCorrectionLevel: "L",
+        });
+        db.insert(tokenFiles)
+          .values({
+            id: newId("file"),
+            tokenId: id,
+            idx: 0,
+            filename: "qr.png",
+            contentType: "image/png",
+            data: png.toString("base64"),
+            createdAt,
+          })
+          .run();
+      }
+
       // Cloned-site tokens: fetch the target page now, inject the beacon,
       // store it for the gateway to serve at /<tokenId>/site.
       if (def.id === "cloned_website") {
-        const targetUrl = String(configResult.data["target_url"] ?? "");
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 10_000);
-          const res = await fetch(targetUrl, {
-            signal: controller.signal,
-            redirect: "follow",
-            headers: { "user-agent": "Mozilla/5.0 (compatible; f0_deception)" },
-          });
-          clearTimeout(timer);
-          if (!res.ok) throw new Error(`target responded ${res.status}`);
-          let html = await res.text();
-          const beacon =
-            `<img src="${gatewayOriginFor(id)}/${id}/pixel.gif" width="1" height="1" alt="" style="display:none">`;
-          html = html.includes("</body>")
-            ? html.replace(/<\/body>/i, `${beacon}</body>`)
-            : html + beacon;
-          db.insert(tokenFiles)
-            .values({
-              id: newId("file"),
-              tokenId: id,
-              idx: 0,
-              filename: "cloned_page.html",
-              contentType: "text/html",
-              data: Buffer.from(html).toString("base64"),
-              createdAt,
-            })
-            .run();
-        } catch (err) {
-          app.log.warn(
-            `clone fetch failed for ${targetUrl}: ${err instanceof Error ? err.message : err}`,
-          );
-        }
+        await cloneWebsiteForToken(
+          app,
+          db,
+          id,
+          String(configResult.data["target_url"] ?? ""),
+        );
       }
 
       return reply.code(201).send({
@@ -216,6 +212,40 @@ export function registerTokenRoutes(
       .where(eq(tokens.id, id))
       .run();
     if (result.changes === 0) return reply.notFound("token not found");
+    return reply.send({ ok: true });
+  });
+
+  // Operator memo edit (status changes use the dedicated route above).
+  app.patch("/api/v1/tokens/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({ memo: z.string().max(500).nullable() })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const result = db
+      .update(tokens)
+      .set({ memo: parsed.data.memo })
+      .where(eq(tokens.id, id))
+      .run();
+    if (result.changes === 0) return reply.notFound("token not found");
+    return reply.send({ ok: true });
+  });
+
+  // Re-run the clone for cloned_website tokens (first attempt failed, or
+  // the target page changed). Outcome is stamped into the token config.
+  app.post("/api/v1/tokens/:id/reclone", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const row = db.select().from(tokens).where(eq(tokens.id, id)).get();
+    if (!row) return reply.notFound("token not found");
+    if (row.type !== "cloned_website") {
+      return reply.badRequest("token is not a cloned_website token");
+    }
+    const targetUrl = String((row.config as Record<string, unknown>)["target_url"] ?? "");
+    if (!targetUrl) return reply.badRequest("token has no target_url configured");
+    const result = await cloneWebsiteForToken(app, db, id, targetUrl);
+    if (!result.ok) return reply.badRequest(`re-clone failed: ${result.error}`);
     return reply.send({ ok: true });
   });
 
@@ -567,4 +597,70 @@ function generateContextFor(tokenId: string, config: Record<string, unknown>) {
     gatewayOrigin,
     config,
   };
+}
+
+/**
+ * Fetch a clone target, inject the pixel beacon, store the page in
+ * token_files idx 0, and record the outcome in the token's config
+ * (clone_status / clone_error / cloned_at) so the console can show it.
+ */
+async function cloneWebsiteForToken(
+  app: FastifyInstance,
+  db: Db,
+  tokenId: string,
+  targetUrl: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const stamp = (status: "ok" | "failed", error: string | null) => {
+    const row = db
+      .select({ config: tokens.config })
+      .from(tokens)
+      .where(eq(tokens.id, tokenId))
+      .get();
+    const config = {
+      ...((row?.config ?? {}) as Record<string, unknown>),
+      clone_status: status,
+      clone_error: error,
+      cloned_at: new Date().toISOString(),
+    };
+    db.update(tokens).set({ config }).where(eq(tokens.id, tokenId)).run();
+  };
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(targetUrl, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "user-agent": "Mozilla/5.0 (compatible; f0_deception)" },
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`target responded ${res.status}`);
+    let html = await res.text();
+    const beacon =
+      `<img src="${gatewayOriginFor(tokenId)}/${tokenId}/pixel.gif" width="1" height="1" alt="" style="display:none">`;
+    html = html.includes("</body>")
+      ? html.replace(/<\/body>/i, `${beacon}</body>`)
+      : html + beacon;
+    db.delete(tokenFiles)
+      .where(and(eq(tokenFiles.tokenId, tokenId), eq(tokenFiles.idx, 0)))
+      .run();
+    db.insert(tokenFiles)
+      .values({
+        id: newId("file"),
+        tokenId,
+        idx: 0,
+        filename: "cloned_page.html",
+        contentType: "text/html",
+        data: Buffer.from(html).toString("base64"),
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    stamp("ok", null);
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    app.log.warn(`clone fetch failed for ${targetUrl}: ${msg}`);
+    stamp("failed", msg);
+    return { ok: false, error: msg };
+  }
 }

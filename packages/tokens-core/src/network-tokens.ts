@@ -135,7 +135,8 @@ export const qrCodeToken: TokenTypeDefinition = {
       {
         kind: "file_download",
         label: "QR code image",
-        value: `/api/v1/tokens/${ctx.tokenId}/artifact/qr.png`,
+        // The API renders the PNG at creation and stores it in token_files.
+        value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
       },
     ];
   },
