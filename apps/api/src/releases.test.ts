@@ -42,6 +42,29 @@ describe("agent release build + delete", () => {
   const saved = savedEnv();
   afterEach(() => restoreEnv(saved));
 
+  it("release signing keys can be deleted", async () => {
+    const app = await makeServer();
+    try {
+      const create = await app.inject({
+        method: "POST",
+        url: "/api/v1/release-keys",
+        payload: { label: "disposable" },
+      });
+      expect(create.statusCode).toBe(201);
+      const { id } = create.json() as { id: string };
+      let res = await app.inject({ method: "DELETE", url: `/api/v1/release-keys/${id}` });
+      expect(res.statusCode).toBe(200);
+      const list = (
+        await app.inject({ method: "GET", url: "/api/v1/release-keys" })
+      ).json() as { id: string }[];
+      expect(list.find((k) => k.id === id)).toBeUndefined();
+      res = await app.inject({ method: "DELETE", url: `/api/v1/release-keys/${id}` });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("delete removes binaries and the manifest, validates filenames", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "f0-del-test-"));
     process.env.F0_AGENT_RELEASE_DIR = dir;

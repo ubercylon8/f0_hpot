@@ -223,6 +223,21 @@ try {
     }
   });
 
+  await check("suite cleans up its generated keys and certs", async () => {
+    const keys = await apiJson("/api/v1/release-keys");
+    for (const k of keys.filter((x) => x.label === KEY_LABEL)) {
+      await apiJson(`/api/v1/release-keys/${k.id}`, { method: "DELETE" });
+    }
+    const certs = await apiJson("/api/v1/codesign-certs");
+    for (const c of certs.filter((x) => x.label === `e2e-cert-${RUN}`)) {
+      await apiJson(`/api/v1/codesign-certs/${c.id}`, { method: "DELETE" });
+    }
+    const keysAfter = await apiJson("/api/v1/release-keys");
+    if (keysAfter.some((x) => x.label === KEY_LABEL)) throw new Error("release key not deleted");
+    const certsAfter = await apiJson("/api/v1/codesign-certs");
+    if (certsAfter.some((x) => x.label === `e2e-cert-${RUN}`)) throw new Error("cert not deleted");
+  });
+
   await check("retire removes the agent after the danger confirm", async () => {
     await row(page, HOST).click();
     await page.waitForSelector("text=Danger zone");

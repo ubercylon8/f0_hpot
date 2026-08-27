@@ -170,6 +170,25 @@ function SigningKeysCard() {
             <span className="min-w-0 flex-1 truncate font-mono text-muted">{k.publicKey}</span>
             <CopyButton value={k.publicKey} label="copy embeddable public key" />
             <span className="shrink-0 text-faint">{new Date(k.createdAt).toLocaleDateString()}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger hover:text-danger"
+              title="delete key (deployed agents keep their embedded public key)"
+              onClick={() =>
+                void api
+                  .deleteReleaseKey(k.id)
+                  .then(() => {
+                    toast.success(`key "${k.label}" deleted`);
+                    void reload();
+                  })
+                  .catch((err: unknown) =>
+                    toast.error(err instanceof Error ? err.message : String(err)),
+                  )
+              }
+            >
+              delete
+            </Button>
           </div>
         ))}
         {(keys ?? []).length === 0 && (

@@ -9,6 +9,8 @@ import {
   listReleaseKeys,
   signReleaseDir,
 } from "../release-signing.js";
+import { releaseKeys } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 import { runTool } from "../codesign.js";
 
 const FILENAME_RE = /^f0-deception-agent-[a-z0-9.-]+$/;
@@ -133,6 +135,17 @@ export function registerReleaseRoutes(app: FastifyInstance, db: Db): void {
   });
 
   app.get("/api/v1/release-keys", async () => listReleaseKeys(db));
+
+  // Delete a signing key. Note: deployed agents embed a public key at
+  // build time — deleting the key it belongs to means you can no longer
+  // sign updates those agents will accept (they keep their embedded key).
+  app.delete("/api/v1/release-keys/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = db.delete(releaseKeys).where(eq(releaseKeys.id, id)).run();
+    if (result.changes === 0) return reply.notFound("release key not found");
+    app.log.warn(`release key ${id} deleted`);
+    return reply.send({ ok: true });
+  });
 
   app.post("/api/v1/agent-releases/sign", async (request, reply) => {
     const parsed = z

@@ -276,6 +276,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ label }),
     }),
+  deleteReleaseKey: (id: string) => request(`/release-keys/${id}`, { method: "DELETE" }),
   signReleases: (keyId: string, version?: string) =>
     request<{ ok: boolean; version: string; files: string[] }>("/agent-releases/sign", {
       method: "POST",
