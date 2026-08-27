@@ -189,6 +189,32 @@ export function registerTokenRoutes(
     return { ...row, hitCount, artifacts, files };
   });
 
+  // Bulk revoke/hard-delete for the console's selection toolbar.
+  app.post("/api/v1/tokens/bulk", async (request, reply) => {
+    const parsed = z
+      .object({
+        ids: z.array(z.string().min(1)).min(1).max(1000),
+        action: z.enum(["revoke", "delete"]),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    const { ids, action } = parsed.data;
+    if (action === "revoke") {
+      const result = db
+        .update(tokens)
+        .set({ status: "revoked" })
+        .where(inArray(tokens.id, ids))
+        .run();
+      return reply.send({ ok: true, updated: result.changes });
+    }
+    db.transaction((tx) => {
+      for (const id of ids) hardDeleteToken(tx as unknown as Db, id);
+    });
+    return reply.send({ ok: true, updated: ids.length });
+  });
+
   app.delete("/api/v1/tokens/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     // ?hard=true deletes the token, its files, and its incident history;
@@ -198,11 +224,7 @@ export function registerTokenRoutes(
       if (!db.select({ id: tokens.id }).from(tokens).where(eq(tokens.id, id)).get()) {
         return reply.notFound("token not found");
       }
-      db.transaction((tx) => {
-        tx.delete(incidents).where(eq(incidents.tokenId, id)).run();
-        tx.delete(tokenFiles).where(eq(tokenFiles.tokenId, id)).run();
-        tx.delete(tokens).where(eq(tokens.id, id)).run();
-      });
+      db.transaction((tx) => hardDeleteToken(tx as unknown as Db, id));
       return reply.send({ ok: true, deleted: "hard" });
     }
     const result = db
@@ -602,6 +624,13 @@ export function registerTokenRoutes(
 function gatewayOriginFor(_tokenId: string): string {
   const baseDomain = process.env.F0_TOKEN_DOMAINS?.split(",")[0]?.trim() ?? "tokens.example.com";
   return process.env.F0_GATEWAY_ORIGIN ?? `https://${baseDomain}`;
+}
+
+/** Hard delete: token + its files + its incident history. */
+function hardDeleteToken(db: Db, id: string): void {
+  db.delete(incidents).where(eq(incidents.tokenId, id)).run();
+  db.delete(tokenFiles).where(eq(tokenFiles.tokenId, id)).run();
+  db.delete(tokens).where(eq(tokens.id, id)).run();
 }
 
 function generateContextFor(tokenId: string, config: Record<string, unknown>) {

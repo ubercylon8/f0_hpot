@@ -238,6 +238,11 @@ export const api = {
     }),
   patchToken: (id: string, memo: string | null) =>
     request(`/tokens/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }),
+  bulkTokenAction: (ids: string[], action: "revoke" | "delete") =>
+    request<{ ok: boolean; updated: number }>("/tokens/bulk", {
+      method: "POST",
+      body: JSON.stringify({ ids, action }),
+    }),
   recloneToken: (id: string) => request(`/tokens/${id}/reclone`, { method: "POST" }),
   uploadTokenImage: (id: string, image: { data: string; contentType: string; filename?: string }) =>
     request(`/tokens/${id}/image`, { method: "POST", body: JSON.stringify(image) }),

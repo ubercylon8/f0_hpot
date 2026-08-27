@@ -693,6 +693,9 @@ export function TokensPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -706,6 +709,40 @@ export function TokensPage() {
       );
     });
   }, [tokens, search, statusFilter]);
+
+  const allChecked = filtered.length > 0 && filtered.every((t) => checked.has(t.id));
+
+  function toggleAll() {
+    setChecked(allChecked ? new Set() : new Set(filtered.map((t) => t.id)));
+    setConfirmBulkDelete(false);
+  }
+
+  function toggleOne(id: string) {
+    const next = new Set(checked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setChecked(next);
+    setConfirmBulkDelete(false);
+  }
+
+  async function bulk(action: "revoke" | "delete") {
+    setBulkBusy(true);
+    try {
+      const r = await api.bulkTokenAction([...checked], action);
+      toast.success(
+        action === "revoke"
+          ? `${r.updated} token(s) revoked`
+          : `${r.updated} token(s) deleted with their history`,
+      );
+      setChecked(new Set());
+      setConfirmBulkDelete(false);
+      void reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   return (
     <section className="space-y-4">
@@ -741,10 +778,61 @@ export function TokensPage() {
         </Select>
       </div>
 
+      {checked.size > 0 && (
+        <Card className="flex items-center gap-3 p-3">
+          <span className="text-sm font-medium">{checked.size} selected</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={bulkBusy}
+            onClick={() => void bulk("revoke")}
+          >
+            revoke selected
+          </Button>
+          {confirmBulkDelete ? (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={bulkBusy}
+                onClick={() => void bulk("delete")}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {bulkBusy ? "deleting…" : "confirm permanent delete"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmBulkDelete(false)}>
+                cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger hover:text-danger"
+              onClick={() => setConfirmBulkDelete(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              delete selected…
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setChecked(new Set())}>
+            clear
+          </Button>
+        </Card>
+      )}
+
       <Card>
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-accent"
+                  checked={allChecked}
+                  onChange={toggleAll}
+                />
+              </TableHead>
               <TableHead>Token ID</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Memo</TableHead>
@@ -756,6 +844,14 @@ export function TokensPage() {
           <TableBody>
             {filtered.map((t) => (
               <TableRow key={t.id} className="cursor-pointer" onClick={() => setSelected(t.id)}>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-accent"
+                    checked={checked.has(t.id)}
+                    onChange={() => toggleOne(t.id)}
+                  />
+                </TableCell>
                 <TableCell className="font-mono text-xs">{t.id}</TableCell>
                 <TableCell>
                   <Badge variant="outline">{t.type}</Badge>

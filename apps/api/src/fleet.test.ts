@@ -445,4 +445,54 @@ describe("fleet + dashboard API", () => {
       await app.close();
     }
   });
+
+  it("bulk token actions: revoke many, hard-delete many with cascade", async () => {
+    const app = await makeServer();
+    try {
+      const a = await createToken(app);
+      const b = await createToken(app);
+      const c = await createToken(app);
+      await forwardHit(app, c);
+
+      let res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens/bulk",
+        payload: { ids: [a, b], action: "revoke" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { updated: number }).updated).toBe(2);
+      let rows = (
+        await app.inject({ method: "GET", url: "/api/v1/tokens" })
+      ).json() as { id: string; status: string }[];
+      expect(rows.find((t) => t.id === a)?.status).toBe("revoked");
+      expect(rows.find((t) => t.id === b)?.status).toBe("revoked");
+      expect(rows.find((t) => t.id === c)?.status).toBe("active");
+
+      res = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens/bulk",
+        payload: { ids: [a, c], action: "delete" },
+      });
+      expect(res.statusCode).toBe(200);
+      rows = (
+        await app.inject({ method: "GET", url: "/api/v1/tokens" })
+      ).json() as { id: string; status: string }[];
+      expect(rows.length).toBe(1);
+      expect(rows[0]?.id).toBe(b);
+      // c's incident history was cascaded away too
+      const incidents = (
+        await app.inject({ method: "GET", url: "/api/v1/incidents" })
+      ).json() as unknown[];
+      expect(incidents.length).toBe(0);
+
+      const bad = await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens/bulk",
+        payload: { ids: [], action: "revoke" },
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
 });
