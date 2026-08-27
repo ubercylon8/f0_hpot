@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { getTokenType } from "@f0/deception-tokens-core";
 import type { Db } from "../db/index.js";
-import { agents, agentSensors } from "../db/schema.js";
+import { agentDeployments, agents, agentSensors, tokens, tokenFiles } from "../db/schema.js";
 import { newId } from "../ids.js";
 import { hashAgentKey, verifyAgentKey } from "../auth.js";
 import { consumeEnrollmentToken } from "../enrollment.js";
+import { generateContextFor } from "./tokens.js";
 
 const SENSOR_CONFIG_SCHEMA = z.array(
   z.object({
@@ -82,7 +84,19 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     const auth = request.headers.authorization;
     const key = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
     const body = z
-      .object({ agent_id: z.string().min(1) })
+      .object({
+        agent_id: z.string().min(1),
+        deployment_results: z
+          .array(
+            z.object({
+              id: z.string().min(1),
+              ok: z.boolean(),
+              error: z.string().max(500).optional(),
+            }),
+          )
+          .max(100)
+          .optional(),
+      })
       .safeParse(request.body);
     if (!key || !body.success) return reply.unauthorized("missing credentials");
 
@@ -96,6 +110,25 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       .where(eq(agents.id, agent.id))
       .run();
 
+    // Token-deployment results from the agent's previous work (agent-scoped
+    // update only — an agent can only complete its own pending deployments).
+    for (const r of body.data.deployment_results ?? []) {
+      db.update(agentDeployments)
+        .set({
+          status: r.ok ? "done" : "failed",
+          error: r.ok ? null : (r.error ?? "agent reported failure"),
+          completedAt: new Date().toISOString(),
+        })
+        .where(
+          and(
+            eq(agentDeployments.id, r.id),
+            eq(agentDeployments.agentId, agent.id),
+            eq(agentDeployments.status, "pending"),
+          ),
+        )
+        .run();
+    }
+
     // Sensor configuration is fleet-managed via the console (DB-backed).
     const sensors = db
       .select({
@@ -107,9 +140,30 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       .where(eq(agentSensors.agentId, agent.id))
       .all();
 
+    // One-shot token deployments pending for this agent.
+    const deployments = db
+      .select({
+        id: agentDeployments.id,
+        kind: agentDeployments.kind,
+        targetDir: agentDeployments.targetDir,
+        filename: agentDeployments.filename,
+        payload: agentDeployments.payload,
+        url: agentDeployments.url,
+      })
+      .from(agentDeployments)
+      .where(
+        and(
+          eq(agentDeployments.agentId, agent.id),
+          eq(agentDeployments.status, "pending"),
+        ),
+      )
+      .limit(20)
+      .all();
+
     return reply.send({
       poll_interval_seconds: Number(process.env.F0_AGENT_POLL_INTERVAL ?? 60),
       sensors,
+      deployments,
     });
   });
 
@@ -204,4 +258,106 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     });
     return reply.send({ ok: true });
   });
+
+  // Queue a token deployment to an agent (one-shot; executed on the next
+  // heartbeat, result reported on the one after).
+  app.post("/api/v1/agents/:id/deploy", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({
+        token_id: z.string().min(1),
+        target_dir: z.string().min(1).max(200),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
+    }
+    if (!db.select({ id: agents.id }).from(agents).where(eq(agents.id, id)).get()) {
+      return reply.notFound("agent not found");
+    }
+    const token = db.select().from(tokens).where(eq(tokens.id, parsed.data.token_id)).get();
+    if (!token) return reply.notFound("token not found");
+    if (token.status !== "active") return reply.badRequest("token is not active");
+
+    const deployment = buildDeployment(db, token.id, token.type);
+    if (!deployment) {
+      return reply.badRequest("token has no deployable artifact (no file, no URL)");
+    }
+    const depId = newId("dep");
+    db.insert(agentDeployments)
+      .values({
+        id: depId,
+        agentId: id,
+        tokenId: token.id,
+        ...deployment,
+        targetDir: parsed.data.target_dir,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    app.log.warn(
+      `deployment ${depId} queued for agent ${id}: ${deployment.kind} ${deployment.filename} -> ${parsed.data.target_dir}`,
+    );
+    return reply.code(201).send({ id: depId, ...deployment, status: "pending" });
+  });
+
+  app.get("/api/v1/agents/:id/deployments", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    return db
+      .select({
+        id: agentDeployments.id,
+        tokenId: agentDeployments.tokenId,
+        kind: agentDeployments.kind,
+        targetDir: agentDeployments.targetDir,
+        filename: agentDeployments.filename,
+        url: agentDeployments.url,
+        status: agentDeployments.status,
+        error: agentDeployments.error,
+        createdAt: agentDeployments.createdAt,
+        completedAt: agentDeployments.completedAt,
+      })
+      .from(agentDeployments)
+      .where(eq(agentDeployments.agentId, id))
+      .orderBy(desc(agentDeployments.createdAt))
+      .limit(50)
+      .all();
+  });
+}
+
+interface DeploymentSpec {
+  kind: "file" | "shortcut";
+  filename: string;
+  payload: string | null;
+  url: string | null;
+}
+
+/**
+ * Build the deployment payload for a token:
+ * - file-bearing tokens (word/excel/pdf/qr/custom_image/sql_injection/
+ *   cloned page) deploy their token_files idx 0 bytes;
+ * - everything else deploys a .url shortcut pointing at its trigger URL.
+ */
+function buildDeployment(db: Db, tokenId: string, tokenType: string): DeploymentSpec | null {
+  const sanitize = (f: string) =>
+    f.replaceAll("\\", "_").replaceAll("/", "_").replaceAll('"', "_").replaceAll("..", "_");
+
+  const file = db
+    .select()
+    .from(tokenFiles)
+    .where(and(eq(tokenFiles.tokenId, tokenId), eq(tokenFiles.idx, 0)))
+    .get();
+  if (file) {
+    return { kind: "file", filename: sanitize(file.filename), payload: file.data, url: null };
+  }
+
+  const def = getTokenType(tokenType as Parameters<typeof getTokenType>[0]);
+  if (!def) return null;
+  const token = db.select().from(tokens).where(eq(tokens.id, tokenId)).get();
+  const artifacts = def.generate(
+    generateContextFor(tokenId, (token?.config ?? {}) as Record<string, unknown>),
+  );
+  const artifact = artifacts.find(
+    (a) => (a.kind === "url" || a.kind === "hostname") && a.value,
+  );
+  if (!artifact) return null;
+  return { kind: "shortcut", filename: `${sanitize(tokenId)}.url`, payload: null, url: artifact.value };
 }

@@ -126,6 +126,33 @@ export const releaseKeys = sqliteTable("release_keys", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const agentDeployments = sqliteTable(
+  "agent_deployments",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    tokenId: text("token_id").notNull(),
+    // file = write payload bytes to target_dir/filename;
+    // shortcut = write a .url file pointing at url.
+    kind: text("kind").notNull(),
+    targetDir: text("target_dir").notNull(),
+    filename: text("filename").notNull(),
+    // base64 file bytes (file kind only).
+    payload: text("payload"),
+    url: text("url"),
+    // pending -> done | failed (agent reports on a later heartbeat).
+    status: text("status").notNull().default("pending"),
+    error: text("error"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    completedAt: text("completed_at"),
+  },
+  (t) => [index("agent_deployments_agent_idx").on(t.agentId)],
+);
+
 export const enrollmentTokens = sqliteTable("enrollment_tokens", {
   id: text("id").primaryKey(),
   label: text("label").notNull(),

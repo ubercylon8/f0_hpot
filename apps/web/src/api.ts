@@ -150,6 +150,19 @@ export interface EnrollmentTokenRow {
   createdAt: string;
 }
 
+export interface DeploymentRow {
+  id: string;
+  tokenId: string;
+  kind: "file" | "shortcut";
+  targetDir: string;
+  filename: string;
+  url: string | null;
+  status: "pending" | "done" | "failed";
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export interface CodeSignCertRow {
   id: string;
   label: string;
@@ -306,6 +319,13 @@ export const api = {
   patchAgent: (id: string, memo: string | null) =>
     request(`/agents/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),
+  deployToAgent: (agentId: string, tokenId: string, targetDir: string) =>
+    request<{ id: string }>(`/agents/${agentId}/deploy`, {
+      method: "POST",
+      body: JSON.stringify({ token_id: tokenId, target_dir: targetDir }),
+    }),
+  listAgentDeployments: (agentId: string) =>
+    request<DeploymentRow[]>(`/agents/${agentId}/deployments`),
   listReleaseKeys: () => request<ReleaseKeyRow[]>("/release-keys"),
   createReleaseKey: (label: string) =>
     request<ReleaseKeyRow>("/release-keys", {

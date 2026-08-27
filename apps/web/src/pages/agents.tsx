@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Hammer, KeyRound, Plus, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
+import { DownloadCloud, Hammer, KeyRound, Plus, RefreshCw, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, downloadFile, type AgentRow, type CodeSignCertRow, type EnrollmentTokenRow, type ReleaseKeyRow } from "../api.js";
+import { api, downloadFile, type AgentRow, type CodeSignCertRow, type DeploymentRow, type EnrollmentTokenRow, type ReleaseKeyRow, type TokenRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -739,6 +739,104 @@ function SensorEditor({
   );
 }
 
+function DeployTokenSection({ agentId }: { agentId: string }) {
+  const [tokens, setTokens] = useState<TokenRow[]>([]);
+  const [deployments, setDeployments] = useState<DeploymentRow[]>([]);
+  const [tokenId, setTokenId] = useState("");
+  const [targetDir, setTargetDir] = useState("/tmp/f0-tokens");
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => api.listAgentDeployments(agentId).then(setDeployments).catch(() => {});
+  useEffect(() => {
+    api
+      .listTokens()
+      .then((rows) => {
+        const active = rows.filter((t) => t.status === "active");
+        setTokens(active);
+        if (active.length > 0) setTokenId((cur) => cur || active[0]!.id);
+      })
+      .catch(() => {});
+    void reload();
+  }, [agentId]);
+
+  async function deploy() {
+    if (!tokenId) return;
+    setBusy(true);
+    try {
+      const r = await api.deployToAgent(agentId, tokenId, targetDir.trim() || "/tmp/f0-tokens");
+      toast.success(`deployment ${r.id} queued — agent picks it up on the next heartbeat`);
+      void reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-faint">
+          Deploy token to host
+        </h3>
+        <Button variant="ghost" size="icon" className="h-7 w-7" title="refresh deployments" onClick={() => void reload()}>
+          <RefreshCw className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Select value={tokenId} onValueChange={setTokenId}>
+          <SelectTrigger className="h-8 min-w-44 flex-1">
+            <SelectValue placeholder="token…" />
+          </SelectTrigger>
+          <SelectContent>
+            {tokens.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.type} · {t.memo ?? t.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          value={targetDir}
+          onChange={(e) => setTargetDir(e.target.value)}
+          placeholder="/tmp/f0-tokens"
+          className="h-8 w-44 font-mono text-xs"
+        />
+        <Button size="sm" disabled={busy || !tokenId} onClick={() => void deploy()}>
+          <DownloadCloud className="h-3.5 w-3.5" />
+          {busy ? "queuing…" : "deploy"}
+        </Button>
+      </div>
+      {deployments.length === 0 ? (
+        <p className="text-xs text-faint">
+          No deployments yet — artifacts land on the next heartbeat.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {deployments.map((d) => (
+            <div key={d.id} className="flex items-center gap-2.5 text-xs">
+              <Badge variant="outline" className="font-mono">
+                {d.kind}
+              </Badge>
+              <span className="min-w-0 flex-1 truncate font-mono">{d.filename}</span>
+              <span className="max-w-40 truncate text-muted">{d.targetDir}</span>
+              {d.status === "done" ? (
+                <Badge variant="accent">done</Badge>
+              ) : d.status === "failed" ? (
+                <Badge variant="high" title={d.error ?? ""}>
+                  failed
+                </Badge>
+              ) : (
+                <Badge variant="medium">pending</Badge>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentDrawer({
   agent,
   onClose,
@@ -845,6 +943,10 @@ function AgentDrawer({
                   />
                 )}
               </div>
+
+              <Separator />
+
+              <DeployTokenSection agentId={agent.id} />
 
               <Separator />
 

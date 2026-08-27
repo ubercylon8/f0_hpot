@@ -13,6 +13,7 @@ import (
 
 	"github.com/f0rt1ka/f0-deception-agent/internal/api"
 	"github.com/f0rt1ka/f0-deception-agent/internal/config"
+	"github.com/f0rt1ka/f0-deception-agent/internal/deploy"
 	"github.com/f0rt1ka/f0-deception-agent/internal/sensors"
 	"github.com/f0rt1ka/f0-deception-agent/internal/update"
 )
@@ -105,16 +106,31 @@ func main() {
 
 	poll := 60 * time.Second
 	var currentSpecs []api.SensorSpec
+	var pendingResults []api.DeploymentResult
 	for {
-		interval, specs, err := client.Heartbeat()
+		interval, specs, deployments, err := client.Heartbeat(pendingResults)
 		switch {
 		case err == nil:
+			// Results we just sent are acked by the server; clear them.
+			pendingResults = nil
 			if interval > 0 {
 				poll = time.Duration(interval) * time.Second
 			}
 			if !specsEqual(currentSpecs, specs) {
 				currentSpecs = specs
 				sensors.StartAll(toSensors(specs), report)
+			}
+			// One-shot token deployments from the console: plant now,
+			// report outcomes on a later heartbeat.
+			if len(deployments) > 0 {
+				pendingResults = deploy.Execute(deployments)
+				ok := 0
+				for _, r := range pendingResults {
+					if r.OK {
+						ok++
+					}
+				}
+				log.Printf("executed %d deployment(s): %d ok, %d failed", len(deployments), ok, len(deployments)-ok)
 			}
 		default:
 			log.Printf("heartbeat failed, retrying in %s: %v", poll, err)

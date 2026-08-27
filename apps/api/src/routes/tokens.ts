@@ -633,7 +633,7 @@ function hardDeleteToken(db: Db, id: string): void {
   db.delete(tokens).where(eq(tokens.id, id)).run();
 }
 
-function generateContextFor(tokenId: string, config: Record<string, unknown>) {
+export function generateContextFor(tokenId: string, config: Record<string, unknown>) {
   const baseDomain = process.env.F0_TOKEN_DOMAINS?.split(",")[0]?.trim() ?? "tokens.example.com";
   const gatewayOrigin = process.env.F0_GATEWAY_ORIGIN ?? `https://${baseDomain}`;
   return {

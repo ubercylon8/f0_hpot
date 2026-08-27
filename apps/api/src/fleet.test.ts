@@ -589,4 +589,93 @@ describe("fleet + dashboard API", () => {
       await app.close();
     }
   });
+
+  it("token deployments: queue, heartbeat delivers, result completes", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const enroll = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/enroll",
+        payload: {
+          enrollment_token: "enroll-token",
+          hostname: "deploy-host",
+          platform: "linux/amd64",
+        },
+      });
+      const { agent_id, agent_key } = enroll.json() as {
+        agent_id: string;
+        agent_key: string;
+      };
+
+      // file-kind deployment (word_doc has token_files)
+      const wordId = await createToken(app, "word_doc");
+      let res = await app.inject({
+        method: "POST",
+        url: `/api/v1/agents/${agent_id}/deploy`,
+        payload: { token_id: wordId, target_dir: "/tmp/f0-test-deploy" },
+      });
+      expect(res.statusCode).toBe(201);
+      const fileDep = res.json() as { id: string; kind: string; filename: string; payload: string | null };
+      expect(fileDep.kind).toBe("file");
+      expect(fileDep.filename).toBe("quarterly_report.docx");
+      expect(fileDep.payload?.length).toBeGreaterThan(100);
+
+      // shortcut-kind deployment (web_bug is URL-only)
+      const webId = await createToken(app, "web_bug");
+      res = await app.inject({
+        method: "POST",
+        url: `/api/v1/agents/${agent_id}/deploy`,
+        payload: { token_id: webId, target_dir: "/tmp/f0-test-deploy" },
+      });
+      expect(res.statusCode).toBe(201);
+      const urlDep = res.json() as { id: string; kind: string; url: string | null };
+      expect(urlDep.kind).toBe("shortcut");
+      expect(urlDep.url).toContain(`/${webId}/pixel.gif`);
+
+      // error paths
+      res = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents/agt_missing/deploy",
+        payload: { token_id: webId, target_dir: "/tmp/x" },
+      });
+      expect(res.statusCode).toBe(404);
+
+      // heartbeat delivers both pending deployments
+      const hb = async (results?: object) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/agent/heartbeat",
+          headers: { authorization: `Bearer ${agent_key}` },
+          payload: { agent_id, ...(results ? { deployment_results: results } : {}) },
+        });
+      let hbRes = await hb();
+      expect(hbRes.statusCode).toBe(200);
+      let body = hbRes.json() as {
+        deployments: { id: string; kind: string; payload: string | null; url: string | null }[];
+      };
+      expect(body.deployments.length).toBe(2);
+
+      // report results: one done, one failed
+      hbRes = await hb([
+        { id: fileDep.id, ok: true },
+        { id: urlDep.id, ok: false, error: "disk full" },
+      ]);
+      expect(hbRes.statusCode).toBe(200);
+      // next heartbeat: nothing pending anymore
+      body = (await hb()).json() as typeof body;
+      expect(body.deployments.length).toBe(0);
+
+      // history reflects the outcomes
+      const history = (
+        await app.inject({ method: "GET", url: `/api/v1/agents/${agent_id}/deployments` })
+      ).json() as { id: string; status: string; error: string | null }[];
+      expect(history.find((d) => d.id === fileDep.id)?.status).toBe("done");
+      const failed = history.find((d) => d.id === urlDep.id);
+      expect(failed?.status).toBe("failed");
+      expect(failed?.error).toBe("disk full");
+    } finally {
+      await app.close();
+    }
+  });
 });

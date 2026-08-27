@@ -13,10 +13,11 @@
  *   F0_E2E_KEY=f0k_... node scripts/e2e/agents-ui.mjs
  */
 import { createPublicKey, verify } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import os from "node:os";
 import path from "node:path";
 import {
   CONSOLE,
@@ -232,6 +233,81 @@ try {
       }
     } finally {
       rmSync(sigDir, { recursive: true, force: true });
+    }
+  });
+
+  await check("live agent deploys a token to disk via the console (full loop)", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "f0-agent-home-"));
+    const targetDir = `/tmp/f0deploy-${RUN}`;
+    const bin = path.join(RELEASE_DIR, "f0-deception-agent");
+    const api = process.env.F0_E2E_API ?? "http://127.0.0.1:18443";
+    const enroll = process.env.F0_E2E_ENROLL ?? "demo-enroll-token";
+    // a file-bearing token to deploy
+    const tok = await apiJson("/api/v1/tokens", {
+      method: "POST",
+      body: JSON.stringify({ type: "word_doc", memo: `e2e-deploy-${RUN}` }),
+    });
+    // spawn the real agent binary in an isolated HOME
+    const child = spawn(bin, ["--server", api, "--enroll", enroll], {
+      env: { ...process.env, HOME: home },
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    try {
+      // wait for the agent to appear in the fleet with this host's name
+      const host = os.hostname();
+      let agentRow;
+      for (let i = 0; i < 20; i++) {
+        const agents = await apiJson("/api/v1/agents");
+        agentRow = agents.find((a) => a.hostname === host);
+        if (agentRow) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!agentRow) throw new Error("live agent did not enroll");
+
+      // drive the console: drawer -> deploy token to host
+      await page.reload();
+      await row(page, host).first().click();
+      await page.waitForSelector("text=Deploy token to host");
+      const drawer = page.getByRole("dialog");
+      await drawer.getByRole("combobox").first().click();
+      await page.getByRole("option", { name: new RegExp(`e2e-deploy-${RUN}`) }).click();
+      await drawer.getByPlaceholder("/tmp/f0-tokens").fill(targetDir);
+      await drawer.getByRole("button", { name: "deploy", exact: true }).click();
+      await page.waitForSelector("text=queued");
+
+      // the agent plants the file within a couple of heartbeats
+      const planted = path.join(targetDir, "quarterly_report.docx");
+      let found = false;
+      for (let i = 0; i < 30; i++) {
+        if (existsSync(planted)) {
+          found = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      if (!found) throw new Error("artifact never landed on disk");
+      const magic = readFileSync(planted).subarray(0, 2).toString("latin1");
+      if (magic !== "PK") throw new Error(`planted file is not a docx (magic ${magic})`);
+
+      // and the drawer reports the completed deployment
+      let done = false;
+      for (let i = 0; i < 20; i++) {
+        await drawer.getByTitle("refresh deployments").click();
+        if ((await drawer.getByText("done", { exact: true }).count()) > 0) {
+          done = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      if (!done) throw new Error("deployment never marked done in the UI");
+      await page.keyboard.press("Escape");
+
+      // clean up: retire the live agent + wipe the planted dir
+      await apiJson(`/api/v1/agents/${agentRow.id}`, { method: "DELETE" });
+      rmSync(targetDir, { recursive: true, force: true });
+    } finally {
+      child.kill();
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

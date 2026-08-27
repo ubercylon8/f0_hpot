@@ -70,12 +70,36 @@ type SensorSpec struct {
 	Config  map[string]interface{} `json:"config"`
 }
 
-// Heartbeat reports liveness and returns current sensor configuration.
-func (c *Client) Heartbeat() (pollIntervalSeconds int, sensors []SensorSpec, err error) {
-	payload, _ := json.Marshal(map[string]string{"agent_id": c.AgentID})
+// Deployment is a one-shot token deployment delivered via heartbeat:
+// plant an artifact file or a URL shortcut on this host.
+type Deployment struct {
+	ID        string  `json:"id"`
+	Kind      string  `json:"kind"` // file | shortcut
+	TargetDir string  `json:"targetDir"`
+	Filename  string  `json:"filename"`
+	Payload   *string `json:"payload"` // base64 file bytes (file kind)
+	URL       *string `json:"url"`     // trigger URL (shortcut kind)
+}
+
+// DeploymentResult reports the outcome of executing a Deployment; sent
+// on a later heartbeat (never in the same one it was received).
+type DeploymentResult struct {
+	ID    string `json:"id"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// Heartbeat reports liveness (plus any deployment results from previous
+// work) and returns current sensor configuration and pending deployments.
+func (c *Client) Heartbeat(results []DeploymentResult) (pollIntervalSeconds int, sensors []SensorSpec, deployments []Deployment, err error) {
+	body := map[string]interface{}{"agent_id": c.AgentID}
+	if len(results) > 0 {
+		body["deployment_results"] = results
+	}
+	payload, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, c.ServerURL+"/api/v1/agent/heartbeat", bytes.NewReader(payload))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("authorization", "Bearer "+c.AgentKey)
 	req.Header.Set("x-agent-id", c.AgentID)
@@ -83,25 +107,26 @@ func (c *Client) Heartbeat() (pollIntervalSeconds int, sensors []SensorSpec, err
 
 	res, err := c.http.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("heartbeat: %w", err)
+		return 0, nil, nil, fmt.Errorf("heartbeat: %w", err)
 	}
 	defer res.Body.Close()
 
 	var out struct {
 		PollIntervalSeconds int          `json:"poll_interval_seconds"`
 		Sensors             []SensorSpec `json:"sensors"`
+		Deployments         []Deployment `json:"deployments"`
 		Message             string       `json:"message"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return 0, nil, fmt.Errorf("heartbeat decode: %w", err)
+		return 0, nil, nil, fmt.Errorf("heartbeat decode: %w", err)
 	}
 	if res.StatusCode == http.StatusUnauthorized {
-		return 0, nil, fmt.Errorf("heartbeat rejected: %s", out.Message)
+		return 0, nil, nil, fmt.Errorf("heartbeat rejected: %s", out.Message)
 	}
 	if res.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("heartbeat failed (%d)", res.StatusCode)
+		return 0, nil, nil, fmt.Errorf("heartbeat failed (%d)", res.StatusCode)
 	}
-	return out.PollIntervalSeconds, out.Sensors, nil
+	return out.PollIntervalSeconds, out.Sensors, out.Deployments, nil
 }
 
 // Incident is the reportable trigger event. It reuses the gateway's

@@ -112,7 +112,26 @@ export function migrate(db: Db): void {
       uses INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS agent_deployments (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      token_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      target_dir TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      payload TEXT,
+      url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
   `);
+
+  client.exec(
+    "CREATE INDEX IF NOT EXISTS agent_deployments_agent_idx ON agent_deployments (agent_id)",
+  );
 
   // Additive column migrations (SQLite has no IF NOT EXISTS for columns).
   addColumnIfMissing(client, "incidents", "notes", "notes TEXT");
