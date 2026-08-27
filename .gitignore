@@ -23,3 +23,9 @@ build/
 # agent build artifacts
 agent/bin/
 agent/f0-deception-agent
+
+# deploy: installer-generated artifacts
+deploy/certs/
+deploy/data/
+deploy/release-bin/
+deploy/Caddyfile

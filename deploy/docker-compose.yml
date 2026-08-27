@@ -23,8 +23,14 @@ services:
       F0_MAX_ALERTS_PER_MINUTE: ${F0_MAX_ALERTS_PER_MINUTE:-1}
       F0_ADMIN_TOKEN: ${F0_ADMIN_TOKEN:?set in .env}
       F0_ENROLLMENT_TOKEN: ${F0_ENROLLMENT_TOKEN:-}
+      F0_GEOIP_DB: ${F0_GEOIP_DB:-}
+      F0_AGENT_RELEASE_DIR: /release-bin
     volumes:
       - api-data:/data
+      # GeoIP .mmdb (optional, mounted read-only when present)
+      - ./data:/geoip:ro
+      # Agent release binaries (built or fetched by the installer)
+      - ./release-bin:/release-bin:ro
     expose:
       - "8443"
 
@@ -40,9 +46,10 @@ services:
       F0_DNS_PORT: 53
       F0_SMTP_PORT: ${F0_SMTP_PORT:-2525}
     ports:
-      - "80:80"        # token trigger URLs
-      - "53:53/udp"    # DNS tokens (authoritative for your token domain)
-      - "${F0_SMTP_PORT:-2525}:${F0_SMTP_PORT:-2525}" # email tokens
+      # Attacker-facing reach-back — published on the chosen public IP.
+      - "${GATEWAY_PUBLISH_IP:-0.0.0.0}:80:80"
+      - "${GATEWAY_PUBLISH_IP:-0.0.0.0}:53:53/udp"
+      - "${GATEWAY_PUBLISH_IP:-0.0.0.0}:${F0_SMTP_PORT:-2525}:${F0_SMTP_PORT:-2525}"
 
   console:
     build:
@@ -52,10 +59,28 @@ services:
     restart: unless-stopped
     environment:
       API_ORIGIN: http://api:8443
+      GATEWAY_ORIGIN: http://gateway:80
       CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Used by the token-surface TLS block (see Caddyfile).
+      TOKEN_DOMAIN: ${F0_TOKEN_DOMAINS:?set in .env}
+      TOKEN_TLS_MODE: ${TOKEN_TLS_MODE:-http}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
     ports:
-      - "443:443"
-      - "8080:80"
+      # Console: loopback by default (reach via ssh -L); set
+      # CONSOLE_PUBLISH_IP to the public IP for public access.
+      # (Private mode serves :8080; public mode serves :80/:443 via ACME.)
+      - "${CONSOLE_PUBLISH_IP:-127.0.0.1}:8080:8080"
+      - "${CONSOLE_PUBLISH_IP:-127.0.0.1}:80:80"
+      # Token surface HTTPS (only used when TOKEN_TLS_MODE != http) and
+      # public console (when CONSOLE_PUBLISH_IP is public).
+      - "${GATEWAY_PUBLISH_IP:-0.0.0.0}:443:443"
 
 volumes:
   api-data:
+  caddy-data:
+  caddy-config:
