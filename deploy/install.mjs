@@ -228,6 +228,37 @@ function which(cmd) {
   return !!run("which", [cmd], { ignoreError: true });
 }
 
+function detectPkgManager() {
+  if (existsSync("/etc/os-release")) {
+    const osr = readFileSync("/etc/os-release", "utf8");
+    if (/\b(ubuntu|debian)\b/i.test(osr)) return "apt";
+    if (/\b(fedora|rhel|centos|rocky|alma)\b/i.test(osr)) return "dnf";
+    if (/\b(arch|manjaro)\b/i.test(osr)) return "pacman";
+  }
+  return null;
+}
+
+function sudoPrefix() {
+  if (typeof process.getuid === "function" && process.getuid() === 0) return "";
+  if (which("sudo")) return "sudo ";
+  throw new Error("not root and sudo not found — install dependencies as root");
+}
+
+function aptInstall(pkgs, label) {
+  const sp = spinner(label);
+  try {
+    const sudo = sudoPrefix();
+    execFileSync("bash", ["-c", `${sudo}apt-get update -qq && ${sudo}apt-get install -y -qq ${pkgs.join(" ")} 2>&1 | tail -5 >> ${LOG_PATH}`], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    sp.succeed(label);
+    return true;
+  } catch (err) {
+    sp.fail(`${label} — apt failed (${err.message}); install manually: ${pkgs.join(" ")}`);
+    return false;
+  }
+}
+
 function log(line) {
   writeFileSync(LOG_PATH, `${new Date().toISOString()} ${line}\n`, { flag: "a" });
 }
@@ -281,22 +312,78 @@ const answers = {};
 
 async function phasePreflight() {
   phase(1, "Preflight checks");
-  const checks = [
-    ["Node.js ≥ 20", () => Number(process.versions.node.split(".")[0]) >= 20 || "upgrade node"],
-    ["docker engine", () => which("docker") || "install docker"],
-    ["docker compose plugin", () => !!run("docker", ["compose", "version"], { ignoreError: true }) || "install the compose plugin"],
-    ["openssl", () => which("openssl") || "install openssl"],
-    ["curl", () => which("curl") || "install curl"],
-    ["dig (dnsutils)", () => which("dig") || "install dnsutils/bind-utils"],
-    ["go toolchain (optional, builds agent binaries)", () => which("go") || true],
+  if (Number(process.versions.node.split(".")[0]) < 20) {
+    throw new Error(`Node.js ≥ 20 required (you have ${process.version})`);
+  }
+  process.stdout.write(`${ok(`Node.js ${process.version}`)}\n`);
+
+  // Required runtime deps with their apt package names (Ubuntu/Debian).
+  const REQUIRED = [
+    { label: "docker engine", ok: () => which("docker"), pkg: "docker.io" },
+    {
+      label: "docker compose plugin",
+      ok: () => !!run("docker", ["compose", "version"], { ignoreError: true }),
+      pkg: "docker-compose-v2",
+    },
+    { label: "git", ok: () => which("git"), pkg: "git" },
+    { label: "openssl", ok: () => which("openssl"), pkg: "openssl" },
+    { label: "curl", ok: () => which("curl"), pkg: "curl" },
+    { label: "dig (dnsutils)", ok: () => which("dig"), pkg: "dnsutils" },
   ];
-  for (const [label, fn] of checks) {
-    const sp = spinner(label);
-    const r = fn();
-    if (r === true) sp.succeed(label);
-    else {
-      sp.fail(`${label} — ${r}`);
-      throw new Error(`preflight failed: ${label}`);
+  // Optional build deps (needed only to compile agent binaries).
+  const BUILD = [
+    { label: "go toolchain (builds agent binaries)", ok: () => which("go"), pkg: "golang-go" },
+    { label: "make (builds agent binaries)", ok: () => which("make"), pkg: "make" },
+  ];
+
+  function report(list, optional) {
+    const missing = [];
+    for (const dep of list) {
+      if (dep.ok()) process.stdout.write(`${ok(dep.label)}\n`);
+      else {
+        process.stdout.write(`${bad(dep.label)}${optional ? " (optional)" : ""}\n`);
+        missing.push(dep);
+      }
+    }
+    return missing;
+  }
+
+  let missing = report(REQUIRED, false);
+  const missingBuild = report(BUILD, true);
+
+  if (missing.length > 0) {
+    const pm = detectPkgManager();
+    if (pm === "apt") {
+      const pkgs = missing.map((d) => d.pkg);
+      process.stdout.write(
+        `${C.amber}  missing required dependencies. The installer can run:${C.reset}\n` +
+          `${C.bold}    apt-get update && apt-get install -y ${pkgs.join(" ")}${C.reset}\n`,
+      );
+      if (await confirm("install them now?", true)) {
+        if (!aptInstall(pkgs, `installing ${pkgs.length} package(s) via apt`)) {
+          throw new Error("dependency install failed");
+        }
+        // Re-verify after install.
+        missing = report(REQUIRED, false);
+      }
+    } else {
+      process.stdout.write(
+        `${C.red}  install these packages manually (${pm ?? "unknown distro"}): ${missing.map((d) => d.pkg).join(" ")}${C.reset}\n`,
+      );
+    }
+  }
+  if (missing.length > 0) throw new Error("preflight failed: required dependencies missing");
+
+  if (missingBuild.length > 0) {
+    if (detectPkgManager() === "apt") {
+      const pkgs = missingBuild.map((d) => d.pkg);
+      if (await confirm(`also install binary-build dependencies (${pkgs.join(" ")})?`, false)) {
+        aptInstall(pkgs, `installing ${pkgs.join(" ")}`);
+      } else {
+        info("skipping build deps — agent binaries won't be compiled on this host.");
+      }
+    } else {
+      info("build deps missing — agent binaries won't be compiled on this host.");
     }
   }
 
