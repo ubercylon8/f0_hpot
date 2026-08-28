@@ -1,0 +1,32 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read  # GitHub's recommended CodeQL permission set
+
+jobs:
+  analyze:
+    # Code scanning needs GitHub Advanced Security on PRIVATE repos (free on public).
+    # This job is skipped (green) while the repo is private and activates automatically
+    # once it is public. push + pull_request only — repository.private is unreliable on schedule.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, go]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # zizmor[artipacked]: the checkout's credentials are not needed past this step.
+          persist-credentials: false
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3  # v4
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3  # v4

@@ -1,0 +1,35 @@
+name: Workflow audit
+
+# zizmor statically audits the workflows themselves — template injection, excessive
+# permissions, unpinned actions, credential persistence. It makes the hardening
+# reasoning fail a build instead of relying on the next reader noticing.
+#
+# The suppressions (`# zizmor[artipacked]`) carry their reasons at the site.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # zizmor[artipacked]: the checkout's credentials are not needed past this step.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
+      # Version-pinned for the same reason the actions and the semgrep image are: this
+      # is a blocking gate, and an unpinned `uvx zizmor` would let a new release change
+      # what the gate enforces with no commit on this side. Dependabot cannot see inside
+      # a `run:` block, so bumping this is a deliberate manual step — which is the point.
+      #
+      # --format=github surfaces findings as inline annotations. Deliberately NOT
+      # --format=sarif: zizmor suppresses its non-zero exit in SARIF mode, which would
+      # turn this gate into a report.
+      - name: Audit workflows
+        run: uvx zizmor@1.29.0 --format=github .github/workflows/

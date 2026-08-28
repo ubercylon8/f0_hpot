@@ -12,17 +12,25 @@ jobs:
     name: Build, sign, publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          # zizmor[artipacked]: the checkout's credentials are not needed past this step;
+          # action-gh-release publishes via the API with its own token input.
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: agent/go.mod
+          # This workflow publishes signed artifacts: a poisoned module cache could
+          # reach them. Cold builds are cheap; cache stays off here (CI keeps it).
+          cache: false
 
       - name: Build + cross-compile
         working-directory: agent
-        run: make release VERSION=${{ github.ref_name }}
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: make release VERSION="$VERSION"
 
       - name: Install signing tools
         run: sudo apt-get update && sudo apt-get install -y openssl
@@ -48,15 +56,20 @@ jobs:
 
       - name: Package
         working-directory: agent
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           cd bin
           sha256sum f0-deception-agent-* release-manifest.json > SHA256SUMS
           cd ..
-          tar -czf f0-deception-agent-${{ github.ref_name }}-linux-amd64.tar.gz \
+          tar -czf "f0-deception-agent-$VERSION-linux-amd64.tar.gz" \
             -C bin f0-deception-agent-linux-amd64 release-manifest.json
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        # zizmor: ignore[superfluous-actions]
+        # `gh release create` could replace this, but the action's glob handling and
+        # generate_release_notes are in use and battle-tested here; keep the pin.
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
           generate_release_notes: true
           files: |

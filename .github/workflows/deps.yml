@@ -1,0 +1,57 @@
+name: Dependency audit
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # zizmor[artipacked]: the checkout's credentials are not needed past this step.
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        with:
+          version: 11.23.0
+      - name: pnpm audit (informational — Dependabot files the fix PRs)
+        run: pnpm audit --prod
+        continue-on-error: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+      # Pinning the tool does not freeze what it knows: govulncheck fetches the advisory
+      # database at run time, so this pins the scanner's behaviour while advisories stay
+      # current. Dependabot cannot see inside a `run:` block, so bumping the version is a
+      # deliberate manual step — which is the point.
+      - name: govulncheck (Go agent — informational)
+        working-directory: agent
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        continue-on-error: true
+
+  # pnpm audit above is informational and scheduled; this is the blocking PR gate.
+  # It diffs the dependency graph at base vs head, which GitHub builds from the
+  # lockfiles directly — no committed manifest and no write-scoped token needed,
+  # so it covers fork PRs too.
+  dependency-review:
+    runs-on: ubuntu-latest
+    # deps.yml also runs on a Monday cron, and dependency-review-action errors out
+    # when there is no pull request to diff.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write  # comment-summary-in-pr only; scoped to this job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # zizmor[artipacked]: the checkout's credentials are not needed past this step.
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48  # v4.9.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
