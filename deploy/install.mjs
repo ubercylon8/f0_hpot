@@ -343,6 +343,28 @@ function dig(query, type) {
   return run("dig", ["+short", query, type, "@8.8.8.8"], { ignoreError: true });
 }
 
+/** Query a specific server, returning only the given sections (e.g. +answer). */
+function digAt(server, query, type, sections = ["+answer"]) {
+  return run("dig", [query, type, `@${server}`, "+noall", ...sections], { ignoreError: true });
+}
+
+/**
+ * Find the authoritative zone hosting `domain` plus one of its nameservers
+ * by walking up suffixes until an SOA resolves. Verification goes directly
+ * against the parent: a recursive lookup would follow the delegation to the
+ * gateway — which isn't running yet at this phase — and fail spuriously.
+ */
+function parentZoneNS(domain) {
+  const labels = domain.split(".");
+  for (let i = 0; i < labels.length - 1; i++) {
+    const suffix = labels.slice(i).join(".");
+    if (!dig(suffix, "SOA")) continue;
+    const ns = dig(suffix, "NS").split("\n").find(Boolean)?.replace(/\.$/, "");
+    if (ns) return { zone: suffix, ns };
+  }
+  return null;
+}
+
 function downloadWithProgress(url, dest, label) {
   return new Promise((resolve, reject) => {
     let lastPrint = 0;
@@ -606,12 +628,20 @@ function renderCaddyfile() {
 
 async function phaseDns() {
   phase(4, "DNS records");
+  const nsHost = `ns1.${answers.tokenDomain}`;
+  // A mail domain at/under the token zone sits below the delegation cut:
+  // no MX record can (or needs to) exist at the parent — the gateway DNS
+  // answers there, and senders fall back to its A record (implicit MX).
+  const mailBelowCut =
+    answers.mailDomain === answers.tokenDomain ||
+    answers.mailDomain.endsWith(`.${answers.tokenDomain}`);
   const records = [
-    ["A", `ns1.${answers.tokenDomain}`, answers.ip, "gateway nameserver identity"],
-    ["NS", answers.tokenDomain, `ns1.${answers.tokenDomain}`, "delegates the token zone to the gateway"],
-    ["A", `*.${answers.tokenDomain}`, answers.ip, "wildcard → host (HTTP token URLs)"],
-    ["MX", answers.mailDomain, `ns1.${answers.tokenDomain}`, "email tokens (priority 10)"],
+    ["A", nsHost, answers.ip, "glue: gateway nameserver address"],
+    ["NS", answers.tokenDomain, nsHost, "delegates the token zone to the gateway"],
   ];
+  if (!mailBelowCut) {
+    records.push(["MX", answers.mailDomain, nsHost, "email tokens (priority 10)"]);
+  }
   if (answers.consoleMode === "public") {
     records.push(["A", answers.consoleDomain, answers.ip, "console (ACME + access)"]);
   }
@@ -620,20 +650,40 @@ async function phaseDns() {
     [
       ...records.map(([t, name, value, why]) => `${C.bold}${t.padEnd(4)}${C.reset}${name} ${C.dim}→${C.reset} ${value} ${C.dim}# ${why}${C.reset}`),
       "",
-      `${C.dim}TTL 60–300s. Propagation may take a few minutes.${C.reset}`,
+      `${C.dim}No wildcard A needed — the gateway DNS answers every name under${C.reset}`,
+      `${C.dim}the delegated zone. NS values must be hostnames, not IPs.${C.reset}`,
     ],
     C.cyan,
   );
   await prompt("press ENTER when the records are in place", { def: "" });
 
+  // Verify against the parent's authoritative nameserver: records are visible
+  // there immediately (no propagation wait), and a recursive lookup would
+  // follow the delegation to the not-yet-running gateway and fail.
+  const parent = parentZoneNS(answers.tokenDomain);
+  if (!parent) {
+    process.stdout.write(`${C.yellow}!${C.reset} could not resolve the parent zone for ${answers.tokenDomain} — skipping verification\n`);
+    return;
+  }
+  process.stdout.write(`${C.dim}checking records directly at ${parent.ns} (${parent.zone})${C.reset}\n`);
   for (;;) {
+    const referral = digAt(parent.ns, answers.tokenDomain, "NS", ["+authority", "+additional"]);
     const checks = [
-      [`A ns1.${answers.tokenDomain} → ${answers.ip}`, dig(`ns1.${answers.tokenDomain}`, "A").includes(answers.ip)],
-      [`NS ${answers.tokenDomain} → ns1`, dig(answers.tokenDomain, "NS").includes(`ns1.${answers.tokenDomain}`)],
-      [`MX ${answers.mailDomain} → ns1`, dig(answers.mailDomain, "MX").includes(`ns1.${answers.tokenDomain}`)],
+      [`NS ${answers.tokenDomain} → ${nsHost}`, referral.includes(nsHost)],
+      [`glue A ${nsHost} → ${answers.ip}`, referral.includes(answers.ip)],
     ];
+    if (!mailBelowCut) {
+      const mailParent = parentZoneNS(answers.mailDomain);
+      const mx = mailParent ? digAt(mailParent.ns, answers.mailDomain, "MX") : "";
+      checks.push([`MX ${answers.mailDomain} → ${nsHost}`, mx.includes(nsHost)]);
+    }
     if (answers.consoleMode === "public") {
-      checks.push([`A ${answers.consoleDomain} → ${answers.ip}`, dig(answers.consoleDomain, "A").includes(answers.ip)]);
+      const consoleParent = answers.consoleDomain === answers.tokenDomain ||
+        answers.consoleDomain.endsWith(`.${answers.tokenDomain}`)
+        ? parent
+        : parentZoneNS(answers.consoleDomain);
+      const a = consoleParent ? digAt(consoleParent.ns, answers.consoleDomain, "A") : "";
+      checks.push([`A ${answers.consoleDomain} → ${answers.ip}`, a.includes(answers.ip)]);
     }
     let allOk = true;
     for (const [label, pass] of checks) {
@@ -642,7 +692,7 @@ async function phaseDns() {
     }
     if (allOk) return;
     const action = await select("some records are not visible yet", [
-      { label: "re-check", value: "retry", hint: "after waiting for propagation" },
+      { label: "re-check", value: "retry", hint: "after fixing/adding records" },
       { label: "skip verification (not recommended)", value: "skip" },
       { label: "abort install", value: "abort" },
     ]);

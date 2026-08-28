@@ -130,8 +130,13 @@ Same as local, but run services under systemd with the standard ports and
 ### Production checklist
 
 - [ ] Set `F0_TOKEN_DOMAINS` and `F0_GATEWAY_ORIGIN` consistently
-- [ ] Point your domain's NS (subdomain delegation) at the gateway for DNS tokens
-- [ ] MX record for email tokens
+- [ ] Delegate the token zone to the gateway: `NS <token-domain> → ns1.<token-domain>`
+  plus glue `A ns1.<token-domain> → <gateway-ip>`. NS values must be hostnames,
+  not IPs. No wildcard A needed — the gateway DNS answers every name under the zone.
+- [ ] Email tokens: if the mail domain is the (delegated) token domain, no MX
+  record is needed — senders fall back to the gateway's A answer (implicit MX).
+  Set `MX <mail-domain> → ns1.<token-domain>` only for a mail domain outside
+  the token zone. Internet senders always deliver on port 25.
 - [ ] Reverse proxy + TLS for console/API
 - [ ] Enroll agents with the *production* API URL
 - [ ] Configure alert channels (SIEM tab) before planting decoys
