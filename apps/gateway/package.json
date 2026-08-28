@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@types/dns-packet": "^5.6.5",
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.3.0",
     "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
