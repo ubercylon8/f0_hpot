@@ -112,21 +112,34 @@ function phase(n, title) {
 
 function spinner(text) {
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const start = Date.now();
   let i = 0;
+  let tail = "";
   hideCursor();
   const timer = setInterval(() => {
-    process.stdout.write(`\r${C.cyan}${frames[i++ % frames.length]}${C.reset} ${text}`);
+    const s = Math.floor((Date.now() - start) / 1000);
+    process.stdout.write(
+      `\r${C.cyan}${frames[i++ % frames.length]}${C.reset} ${text} ${C.dim}${s}s${C.reset}\n` +
+        (tail ? `${C.dim}  ${tail}${C.reset}\x1b[1A` : "\x1b[1A"),
+    );
   }, 80);
   return {
-    succeed(msg = text) {
+    setTail(t) {
+      tail = t.slice(0, 90);
+    },
+    _stop() {
       clearInterval(timer);
       showCursor();
-      process.stdout.write(`\r${ok(msg)}${" ".repeat(20)}\n`);
+      // clear the spinner line + tail line
+      process.stdout.write(`\r\x1b[K\n\x1b[K\x1b[1A`);
+    },
+    succeed(msg = text) {
+      this._stop();
+      process.stdout.write(`${ok(msg)}${" ".repeat(20)}\n`);
     },
     fail(msg = text) {
-      clearInterval(timer);
-      showCursor();
-      process.stdout.write(`\r${bad(msg)}${" ".repeat(20)}\n`);
+      this._stop();
+      process.stdout.write(`${bad(msg)}${" ".repeat(20)}\n`);
     },
   };
 }
@@ -143,9 +156,11 @@ function progress(label, fraction, extra = "") {
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-// Line queue: readline drops lines that arrive while no question is
-// pending (e.g. piped stdin). Buffer every line; prompts consume in
-// order, and a closed stdin rejects instead of hanging forever.
+// Line queue is authoritative for ALL input modes: readline (in any
+// mode) only buffers while a question is pending, so paste-ahead or
+// scripted lines must be captured continuously. rl.question is used
+// for interactive typing only (proper line editing) when the queue is
+// empty; its answer's duplicate line is then dropped from the queue.
 const lineQueue = [];
 let rlClosed = false;
 let lineWaiter = null;
@@ -180,9 +195,25 @@ function nextLine() {
 function prompt(question, { def = "", validate = () => true, hint = "" } = {}) {
   const ask = async () => {
     const suffix = def ? ` ${C.dim}(${def})${C.reset}` : "";
-    process.stdout.write(`${C.amber}?${C.reset} ${question}${suffix}: `);
-    const answer = await nextLine();
-    const value = answer.trim() || def;
+    let value;
+    if (lineQueue.length > 0) {
+      // paste-ahead / scripted input already buffered
+      value = lineQueue.shift().trim() || def;
+      process.stdout.write(`${C.amber}?${C.reset} ${question}${suffix}: ${value}\n`);
+    } else if (rlClosed) {
+      throw new Error("stdin closed before all answers were given");
+    } else {
+      // interactive typing: readline-managed edit line (backspace-safe)
+      value = await new Promise((resolve) => {
+        rl.question(`${C.amber}?${C.reset} ${question}${suffix}: `, resolve);
+      });
+      value = value.trim() || def;
+      // the answered line may also have landed in the queue — drop it
+      // only if it's the duplicate (keep genuine paste-ahead lines)
+      if (lineQueue.length > 0 && lineQueue[0].trim() === value) {
+        lineQueue.shift();
+      }
+    }
     const err = validate(value);
     if (err === true) return value;
     process.stdout.write(`${C.red}  ${err || "invalid value"}${C.reset}\n`);
@@ -244,17 +275,52 @@ function sudoPrefix() {
   throw new Error("not root and sudo not found — install dependencies as root");
 }
 
-function aptInstall(pkgs, label) {
-  const sp = spinner(label);
+/** Spawn with a live spinner + rolling last-output-line (full log to file). */
+function runTask(label, cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const sp = spinner(label);
+    const p = spawn(cmd, args, { cwd: opts.cwd ?? DEPLOY_DIR, shell: !!opts.shell });
+    const onData = (d) => {
+      for (const line of d.toString().split(/\r?\n/)) {
+        const t = line.trim();
+        if (t) {
+          log(t);
+          sp.setTail(t);
+        }
+      }
+    };
+    p.stdout.on("data", onData);
+    p.stderr.on("data", onData);
+    p.on("close", (code) => {
+      if (code === 0) {
+        sp.succeed(label);
+        resolve();
+      } else {
+        sp.fail(`${label} (exit ${code}) — see ${LOG_PATH}`);
+        reject(new Error(`${cmd} ${args.join(" ")} failed`));
+      }
+    });
+    p.on("error", (err) => {
+      sp.fail(`${label} — ${err.message}`);
+      reject(err);
+    });
+  });
+}
+
+async function aptInstall(pkgs, label) {
   try {
     const sudo = sudoPrefix();
-    execFileSync("bash", ["-c", `${sudo}apt-get update -qq && ${sudo}apt-get install -y -qq ${pkgs.join(" ")} 2>&1 | tail -5 >> ${LOG_PATH}`], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    sp.succeed(label);
+    await runTask(
+      label,
+      "bash",
+      ["-c", `${sudo}apt-get update -qq && ${sudo}apt-get install -y -qq ${pkgs.join(" ")}`],
+      { shell: false },
+    );
     return true;
-  } catch (err) {
-    sp.fail(`${label} — apt failed (${err.message}); install manually: ${pkgs.join(" ")}`);
+  } catch {
+    process.stdout.write(
+      `${C.red}  apt failed — install manually: ${pkgs.join(" ")}${C.reset}\n`,
+    );
     return false;
   }
 }
@@ -592,14 +658,13 @@ async function phaseBuild() {
   mkdirSync(path.join(DEPLOY_DIR, "data"), { recursive: true });
 
   if (answers.buildBinaries) {
-    const sp = spinner("cross-compiling 5 agent platforms (go build)");
     try {
-      run("make", ["-C", path.join(REPO_ROOT, "agent"), "release", `OUT=${path.join(DEPLOY_DIR, "release-bin")}`], {
-        ignoreError: false,
-      });
-      sp.succeed("agent binaries built (linux/darwin/windows, amd64+arm64)");
+      await runTask("cross-compiling 5 agent platforms (go build)", "make", [
+        "-C", path.join(REPO_ROOT, "agent"), "release",
+        `OUT=${path.join(DEPLOY_DIR, "release-bin")}`,
+      ]);
     } catch {
-      sp.fail("binary build failed — see install.log; place binaries into deploy/release-bin manually");
+      info("binary build failed — see install.log; place binaries into deploy/release-bin manually");
     }
   } else {
     info("skipping binary build — place release binaries into deploy/release-bin yourself (make -C agent release).");
@@ -617,25 +682,9 @@ async function phaseBuild() {
 }
 
 function compose(args, label) {
-  return new Promise((resolve, reject) => {
-    const sp = spinner(label);
-    const p = spawn(
-      "docker",
-      ["compose", "-f", path.join(DEPLOY_DIR, "docker-compose.yml"), "--env-file", ENV_PATH, ...args],
-      { cwd: DEPLOY_DIR },
-    );
-    p.stdout.on("data", (d) => log(d.toString().trim()));
-    p.stderr.on("data", (d) => log(d.toString().trim()));
-    p.on("close", (code) => {
-      if (code === 0) {
-        sp.succeed(label);
-        resolve();
-      } else {
-        sp.fail(`${label} (exit ${code}) — see ${LOG_PATH}`);
-        reject(new Error(`docker compose ${args.join(" ")} failed`));
-      }
-    });
-  });
+  return runTask(label, "docker", [
+    "compose", "-f", path.join(DEPLOY_DIR, "docker-compose.yml"), "--env-file", ENV_PATH, ...args,
+  ]);
 }
 
 async function phaseDeploy() {
