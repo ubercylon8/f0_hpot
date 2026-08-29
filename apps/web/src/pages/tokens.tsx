@@ -538,7 +538,13 @@ function TokenDrawer({
         })
         .catch(() => setDetail(null));
   };
-  useEffect(refresh, [tokenId]);
+  // Clear first: without this the drawer renders the previously opened
+  // token's data until the new fetch resolves.
+  useEffect(() => {
+    setDetail(null);
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenId]);
   useEffect(() => setConfirming(false), [tokenId]);
 
   async function act(fn: () => Promise<unknown>, done: string) {

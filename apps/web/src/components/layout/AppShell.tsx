@@ -63,6 +63,11 @@ export function AppShell() {
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // A Radix dialog/sheet trigger is a <button>, not a <select>, so the
+      // tag check above does not cover it: pressing 1-6 mid-edit navigated
+      // away and unmounted the open dialog. Ignore navigation while any
+      // modal layer is open (Esc still closes it).
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
       const to = routes[e.key];
       if (to) {
         void navigate(to);

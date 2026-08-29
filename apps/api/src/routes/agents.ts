@@ -162,7 +162,7 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       .all();
 
     return reply.send({
-      poll_interval_seconds: Number(process.env.F0_AGENT_POLL_INTERVAL ?? 60),
+      poll_interval_seconds: pollIntervalSeconds(),
       sensors,
       deployments,
     });
@@ -281,6 +281,14 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     const token = db.select().from(tokens).where(eq(tokens.id, parsed.data.token_id)).get();
     if (!token) return reply.notFound("token not found");
     if (token.status !== "active") return reply.badRequest("token is not active");
+    // A honeypot token's artifact is the reference string "token_id=<id>",
+    // meaningful only to a sensor config. Deploying it planted a nonsense
+    // shortcut on the host instead of being rejected.
+    if (token.type === "honeypot") {
+      return reply.badRequest(
+        "honeypot tokens are not deployable files — reference this token from a sensor's token_id instead",
+      );
+    }
 
     const deployment = buildDeployment(db, token.id, token.type);
     if (!deployment) {
