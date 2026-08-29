@@ -685,8 +685,14 @@ function CodeSigningCard() {
   const sel = useSelection();
 
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  // Two different tools: signing a binary needs osslsigncode, while
+  // generating or importing a certificate only needs openssl. Gating both
+  // on osslsigncode left "generate" enabled on a host without openssl,
+  // where it failed with "spawn openssl ENOENT".
   const canSign = caps?.codeSigning ?? true;
   const signBlockedReason = caps?.reasons?.["codeSigning"];
+  const canManageCerts = caps?.releaseSigning ?? true;
+  const certBlockedReason = caps?.reasons?.["releaseSigning"];
 
   const reload = () => api.listCodeSignCerts().then(setCerts).catch(() => setCerts([]));
   useEffect(() => {
@@ -740,6 +746,11 @@ function CodeSigningCard() {
           {!canSign && signBlockedReason && (
             <span className="mt-1.5 block text-danger">
               Signing is unavailable here — {signBlockedReason}.
+            </span>
+          )}
+          {!canManageCerts && certBlockedReason && (
+            <span className="mt-1.5 block text-danger">
+              Certificate generation and import are unavailable here — {certBlockedReason}.
             </span>
           )}
         </CardDescription>
@@ -836,7 +847,8 @@ function CodeSigningCard() {
             <Button
               size="sm"
               variant="outline"
-              disabled={busy || !label.trim() || !cn.trim() || genPass.length < 4}
+              disabled={busy || !canManageCerts || !label.trim() || !cn.trim() || genPass.length < 4}
+              title={canManageCerts ? undefined : certBlockedReason}
               onClick={() =>
                 void run(async () => {
                   await api.generateCodeSignCert(label.trim(), cn.trim(), genPass);
@@ -856,12 +868,20 @@ function CodeSigningCard() {
           <div className="flex flex-wrap items-center gap-2">
             <Input placeholder="label" value={upLabel} onChange={(e) => setUpLabel(e.target.value)} className="h-8 w-36" />
             <Input type="password" placeholder="passphrase" value={upPass} onChange={(e) => setUpPass(e.target.value)} className="h-8 w-36" />
-            <label className="inline-flex cursor-pointer items-center gap-2">
+            {/* `cn` here is the Common Name state, not the class helper. */}
+            <label
+              className={
+                canManageCerts
+                  ? "inline-flex cursor-pointer items-center gap-2"
+                  : "inline-flex cursor-not-allowed items-center gap-2 opacity-50"
+              }
+              title={canManageCerts ? undefined : certBlockedReason}
+            >
               <input
                 type="file"
                 accept=".p12,.pfx,application/x-pkcs12"
                 className="hidden"
-                disabled={busy}
+                disabled={busy || !canManageCerts}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) upload(f);
