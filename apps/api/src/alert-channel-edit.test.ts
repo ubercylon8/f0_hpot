@@ -78,6 +78,46 @@ describe("alert channel editing", () => {
     }
   });
 
+  it("keeps the secret when the field is OMITTED, as the console form sends it", async () => {
+    // The add/edit form drops blank fields instead of sending the mask, so
+    // the key never reaches the server. Merging driven off the incoming keys
+    // silently dropped the stored credential on every edit.
+    const app = await openServer();
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/v1/alert-channels",
+        payload: {
+          kind: "webhook",
+          config: { url: "https://old.example/h", secret: "kept-secret" },
+        },
+      });
+      const { id } = created.json() as { id: string };
+
+      const sent: (string | undefined)[] = [];
+      const server = (await import("node:http")).createServer((req, res) => {
+        sent.push(req.headers["x-f0-signature"] as string | undefined);
+        res.writeHead(200).end("{}");
+      });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const port = (server.address() as { port: number }).port;
+
+      // Note: no `secret` key at all.
+      const edited = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/alert-channels/${id}`,
+        payload: { config: { url: `http://127.0.0.1:${port}/after` } },
+      });
+      expect(edited.statusCode).toBe(200);
+
+      await app.inject({ method: "POST", url: `/api/v1/alert-channels/${id}/test` });
+      server.close();
+      expect(sent[0]).toBe("kept-secret");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("replaces a secret when a new value is supplied", async () => {
     const app = await openServer();
     try {

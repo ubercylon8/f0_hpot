@@ -142,10 +142,23 @@ export function registerAlertRoutes(
       const stored = (existing.config ?? {}) as Record<string, unknown>;
       const incoming = parsed.data.config;
       const merged: Record<string, unknown> = { ...incoming };
+
+      // Drive this from the STORED keys, not the incoming ones. A form that
+      // omits blank fields never sends the secret at all, so iterating over
+      // `incoming` would never see it and the stored credential would be
+      // silently dropped on every edit.
+      const keptFromStore = (k: string, v: unknown) =>
+        v === undefined || v === "" || v === SECRET_MASK;
+      for (const [k, v] of Object.entries(stored)) {
+        if (SECRET_KEY_RE.test(k) && keptFromStore(k, incoming[k])) {
+          merged[k] = v;
+        }
+      }
+      // A masked or blank secret with nothing stored behind it is not a
+      // value — drop it rather than persisting the mask.
       for (const [k, v] of Object.entries(incoming)) {
-        if (SECRET_KEY_RE.test(k) && (v === SECRET_MASK || v === "" || v === undefined)) {
-          if (stored[k] !== undefined) merged[k] = stored[k];
-          else delete merged[k];
+        if (SECRET_KEY_RE.test(k) && keptFromStore(k, v) && stored[k] === undefined) {
+          delete merged[k];
         }
       }
       const schema = channelConfigSchemas[existing.kind];
