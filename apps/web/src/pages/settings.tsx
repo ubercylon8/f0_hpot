@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { CopyButton } from "@/components/CopyButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
@@ -129,11 +130,11 @@ function ApiKeysCard() {
                 created {timeAgo(k.createdAt)} · last used{" "}
                 {k.lastUsedAt ? timeAgo(k.lastUsedAt) : "never"}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto text-danger hover:text-danger"
-                onClick={() =>
+              <ConfirmButton
+                label="revoke"
+                className="ml-auto"
+                title="Revoking the key this browser is using signs you out."
+                onConfirm={() =>
                   void api
                     .deleteAuthKey(k.id)
                     .then(() => void reload())
@@ -142,9 +143,7 @@ function ApiKeysCard() {
                       toast.error(err instanceof Error ? err.message : String(err)),
                     )
                 }
-              >
-                revoke
-              </Button>
+              />
             </div>
           ))}
           {(keys ?? []).length === 0 && (

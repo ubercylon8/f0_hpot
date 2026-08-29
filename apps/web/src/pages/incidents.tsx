@@ -75,6 +75,13 @@ export function IncidentsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  // The server caps at 500 and defaults to 200. The list used to send no
+  // limit at all and had no pagination, so past 200 incidents it silently
+  // truncated — the operator believed they were seeing everything.
+  const PAGE = 100;
+  const MAX_LIMIT = 500;
+  const [limit, setLimit] = useState(PAGE);
+
   const { data: incidents, error, reload } = usePoll<Incident[]>(() =>
     api.listIncidents({
       severity: severity === "all" ? undefined : severity,
@@ -82,13 +89,19 @@ export function IncidentsPage() {
       acknowledged: acked === "all" ? undefined : acked,
       source_ip: sourceIp || undefined,
       q: q || undefined,
+      limit: String(limit),
     }),
   );
 
   // Refetch immediately when a filter changes (the 15s interval continues).
   useEffect(() => {
     void reload();
-  }, [severity, type, acked, sourceIp, q, reload]);
+  }, [severity, type, acked, sourceIp, q, limit, reload]);
+
+  // A filter change starts a fresh page.
+  useEffect(() => {
+    setLimit(PAGE);
+  }, [severity, type, acked, sourceIp, q]);
 
   const list = useMemo(() => incidents ?? [], [incidents]);
   const [expanded, setExpanded] = useState<string | null>(
@@ -216,6 +229,24 @@ export function IncidentsPage() {
 
       {list.length === 0 && (
         <p className="text-sm text-faint">No incidents match the current filters.</p>
+      )}
+      {list.length >= limit && (
+        <div className="flex items-center gap-3 pt-1 text-xs text-faint">
+          <span>
+            showing the {list.length} most recent
+            {limit >= MAX_LIMIT ? " (server maximum)" : ""}
+          </span>
+          {limit < MAX_LIMIT && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLimit((l) => Math.min(l + PAGE, MAX_LIMIT))}
+            >
+              load more
+            </Button>
+          )}
+          {limit >= MAX_LIMIT && <span>narrow the filters to see older events</span>}
+        </div>
       )}
       {list.map((i) => {
         const { label, detail, sourceIp } = incidentSummary(i);

@@ -7,6 +7,7 @@ import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -233,11 +234,10 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
             onCheckedChange={(v) => void toggle(v)}
             title={channel.enabled ? "disable channel" : "enable channel"}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-danger hover:text-danger"
-            onClick={() =>
+          <ConfirmButton
+            label="delete"
+            disabled={busy !== null}
+            onConfirm={() =>
               void api
                 .deleteChannel(channel.id)
                 .then(onChanged)
@@ -246,9 +246,7 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
                   toast.error(err instanceof Error ? err.message : String(err)),
                 )
             }
-          >
-            delete
-          </Button>
+          />
         </div>
       </CardContent>
     </Card>

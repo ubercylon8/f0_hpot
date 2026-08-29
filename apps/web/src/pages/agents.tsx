@@ -6,6 +6,7 @@ import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { CopyButton } from "@/components/CopyButton";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -308,11 +309,10 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
                   {t.lastUsedAt ? ` · last ${timeAgo(t.lastUsedAt)}` : ""}
                   {t.expiresAt ? ` · expires ${new Date(t.expiresAt).toLocaleDateString()}` : ""}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto text-danger hover:text-danger"
-                  onClick={() =>
+                <ConfirmButton
+                  label="delete"
+                  className="ml-auto"
+                  onConfirm={() =>
                     void api
                       .deleteEnrollmentToken(t.id)
                       .then(() => {
@@ -323,9 +323,7 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
                         toast.error(err instanceof Error ? err.message : String(err)),
                       )
                   }
-                >
-                  delete
-                </Button>
+                />
               </div>
             ))}
           </div>
@@ -1239,10 +1237,14 @@ function AgentDrawer({
 export function AgentsPage() {
   const { data: agents, error, reload } = usePoll<AgentRow[]>(() => api.listAgents());
   const [addOpen, setAddOpen] = useState(false);
-  const [selected, setSelected] = useState<AgentRow | null>(null);
+  // Track the id, not the row object: the drawer must re-render from the
+  // polled list after a mutation, or it keeps showing pre-save sensors and
+  // leaves the memo save button enabled as though nothing landed.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const sel = useSelection();
   const [bulkBusy, setBulkBusy] = useState(false);
   const list = agents ?? [];
+  const selected = list.find((a) => a.id === selectedId) ?? null;
 
   async function retireSelected() {
     setBulkBusy(true);
@@ -1298,7 +1300,7 @@ export function AgentsPage() {
           </TableHeader>
           <TableBody>
             {list.map((a) => (
-              <TableRow key={a.id} className="cursor-pointer" onClick={() => setSelected(a)}>
+              <TableRow key={a.id} className="cursor-pointer" onClick={() => setSelectedId(a.id)}>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
@@ -1348,7 +1350,7 @@ export function AgentsPage() {
       </div>
 
       <AddAgentDialog open={addOpen} onOpenChange={setAddOpen} />
-      <AgentDrawer agent={selected} onClose={() => setSelected(null)} onChanged={() => void reload()} />
+      <AgentDrawer agent={selected} onClose={() => setSelectedId(null)} onChanged={() => void reload()} />
     </section>
   );
 }
