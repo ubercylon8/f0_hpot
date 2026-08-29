@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -165,6 +166,25 @@ func runAgent(ctx context.Context, state config.State) {
 				}
 				log.Printf("executed %d deployment(s): %d ok, %d failed", len(deployments), ok, len(deployments)-ok)
 			}
+		case errors.Is(err, api.ErrRevoked):
+			// Retired from the console. Shut the honeypots down: leaving
+			// them listening would mean a host that looks defended while
+			// every detection is silently rejected.
+			//
+			// Deliberately not self-uninstalling. A console compromise
+			// would otherwise be able to wipe the fleet and destroy
+			// evidence, and an API restored from an older backup would
+			// tell healthy agents they are unknown. Going dormant is
+			// recoverable; deleting yourself is not.
+			sensors.StopAll()
+			log.Printf("this agent was retired from the console: %v", err)
+			log.Printf("sensors stopped. To remove the service from this host, run: %s --uninstall", self)
+			log.Printf("to put it back to work, re-enroll: %s --server <url> --enroll <token>", self)
+			// Stay alive and idle rather than exiting: the service manager
+			// would only restart us into the same state, and a crash loop
+			// buries the message above.
+			<-ctx.Done()
+			return
 		default:
 			log.Printf("heartbeat failed, retrying in %s: %v", poll, err)
 		}

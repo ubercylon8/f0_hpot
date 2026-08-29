@@ -5,6 +5,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -120,6 +121,11 @@ func (c *Client) Heartbeat(results []DeploymentResult) (pollIntervalSeconds int,
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return 0, nil, nil, fmt.Errorf("heartbeat decode: %w", err)
 	}
+	// 410 is the console saying this agent was retired — a definitive,
+	// non-transient answer the caller must not retry through.
+	if res.StatusCode == http.StatusGone {
+		return 0, nil, nil, fmt.Errorf("%w: %s", ErrRevoked, out.Message)
+	}
 	if res.StatusCode == http.StatusUnauthorized {
 		return 0, nil, nil, fmt.Errorf("heartbeat rejected: %s", out.Message)
 	}
@@ -128,6 +134,11 @@ func (c *Client) Heartbeat(results []DeploymentResult) (pollIntervalSeconds int,
 	}
 	return out.PollIntervalSeconds, out.Sensors, out.Deployments, nil
 }
+
+// ErrRevoked means the console no longer knows this agent: it was retired
+// from the fleet. Distinct from an auth failure, which may be transient or
+// an orphaned process, and which the agent keeps retrying through.
+var ErrRevoked = errors.New("agent revoked")
 
 // Incident is the reportable trigger event. It reuses the gateway's
 // incident ingestion endpoint so all detections flow through one pipeline.

@@ -102,7 +102,21 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     if (!key || !body.success) return reply.unauthorized("missing credentials");
 
     const agent = db.select().from(agents).where(eq(agents.id, body.data.agent_id)).get();
-    if (!agent || !verifyAgentKey(key, agent.agentKeyHash)) {
+    // Distinguish "this agent was retired" from "these credentials are
+    // wrong". A retired agent is told so definitively (410) so it can stop
+    // its sensors instead of running honeypots nobody is listening to.
+    // A bad key on an agent that still exists stays a 401: it may be an
+    // orphaned process superseded by a re-enrollment, and it must keep
+    // retrying rather than treat a transient problem as decommissioning.
+    if (!agent) {
+      return reply.code(410).send({
+        statusCode: 410,
+        error: "Gone",
+        status: "revoked",
+        message: "agent is no longer registered with this console",
+      });
+    }
+    if (!verifyAgentKey(key, agent.agentKeyHash)) {
       return reply.unauthorized("unknown agent or bad key");
     }
 

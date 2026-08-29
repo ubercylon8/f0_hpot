@@ -1263,9 +1263,20 @@ function AgentDrawer({
                   <div className="space-y-3 rounded-md border border-danger/30 bg-danger-dim p-3">
                     <p className="text-xs text-foreground">
                       Retire <strong>{agent.hostname}</strong>? Its key stops working
-                      immediately (heartbeats and incident reports will be rejected).
-                      Past incidents are kept.
+                      immediately and past incidents are kept.
                     </p>
+                    {/* Retiring is server-side only. Saying so plainly beats
+                        letting an operator assume the host was cleaned up. */}
+                    <p className="text-xs text-muted">
+                      This does not uninstall anything. On its next heartbeat the agent
+                      learns it was retired and shuts its sensors down, but the service
+                      stays installed. To remove it, run on the host:
+                    </p>
+                    <code className="block rounded bg-overlay px-2 py-1 font-mono text-[11px] text-foreground">
+                      {agent.platform.startsWith("windows")
+                        ? "f0-deception-agent-windows-amd64.exe --uninstall"
+                        : "sudo f0-deception-agent --uninstall"}
+                    </code>
                     <div className="flex gap-2">
                       <Button
                         variant="destructive"
@@ -1322,7 +1333,7 @@ export function AgentsPage() {
     const r = await deleteMany([...sel.sel], (id) => api.deleteAgent(id));
     setBulkBusy(false);
     if (r.failed > 0) toast.error(`${r.failed} agent(s) failed to retire`);
-    else toast.success(`${r.ok} agent(s) retired — their keys are dead`);
+    else toast.success(`${r.ok} agent(s) retired — sensors stop on next heartbeat; uninstall on the host`);
     sel.clear();
     void reload();
   }

@@ -117,14 +117,17 @@ describe("fleet + dashboard API", () => {
 
       res = await app.inject({ method: "DELETE", url: `/api/v1/agents/${agent_id}` });
       expect(res.statusCode).toBe(200);
-      // The retired agent's key no longer authorizes heartbeats.
+      // A retired agent gets 410 + a revoked marker, not a bare 401: the
+      // agent keys off that to stop its sensors instead of leaving
+      // honeypots listening with nobody receiving their detections.
       const hb = await app.inject({
         method: "POST",
         url: "/api/v1/agent/heartbeat",
         headers: { authorization: `Bearer ${agent_key}` },
         payload: { agent_id },
       });
-      expect(hb.statusCode).toBe(401);
+      expect(hb.statusCode).toBe(410);
+      expect((hb.json() as { status: string }).status).toBe("revoked");
       list = (await app.inject({ method: "GET", url: "/api/v1/agents" })).json() as [];
       expect(list.length).toBe(0);
       res = await app.inject({ method: "DELETE", url: `/api/v1/agents/${agent_id}` });
