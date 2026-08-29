@@ -93,15 +93,19 @@ function endpointSummary(c: AlertChannel): string {
   }
 }
 
-function AddChannelDialog({
+function ChannelDialog({
   open,
   onOpenChange,
-  onCreated,
+  onSaved,
+  channel,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  onCreated: () => void;
+  onSaved: () => void;
+  /** Present when editing an existing channel; absent when adding one. */
+  channel?: AlertChannel | null;
 }) {
+  const editing = !!channel;
   const [kind, setKind] = useState("webhook");
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -110,16 +114,32 @@ function AddChannelDialog({
 
   // Values are keyed by field name and several kinds share "url"; without
   // this, switching kind (or reopening the dialog) carried the previous
-  // entry over into a channel it doesn't belong to.
+  // entry over into a channel it doesn't belong to. When editing, seed from
+  // the channel — except secrets, which arrive masked and are left blank.
   useEffect(() => {
-    setValues({});
-  }, [kind, open]);
+    if (!open) return;
+    if (channel) {
+      setKind(channel.kind);
+      const seeded: Record<string, string> = {};
+      for (const f of KIND_FIELDS[channel.kind] ?? []) {
+        const v = (channel.config as Record<string, unknown>)[f.key];
+        if (f.secret) continue;
+        if (v !== undefined && v !== null) seeded[f.key] = String(v);
+      }
+      setValues(seeded);
+    } else {
+      setValues({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, open, channel?.id]);
 
   async function create() {
     const config: Record<string, unknown> = {};
     for (const f of fields) {
       const v = (values[f.key] ?? "").trim();
-      if (f.required && !v) {
+      // A blank secret while editing means "keep the stored one", which the
+      // client can never display — so it is not a missing required value.
+      if (f.required && !v && !(editing && f.secret)) {
         toast.error(`${f.label} is required`);
         return;
       }
@@ -128,10 +148,15 @@ function AddChannelDialog({
     }
     setBusy(true);
     try {
-      await api.createChannel(kind, config);
-      toast.success(`${KIND_LABELS[kind]} channel added`);
+      if (channel) {
+        await api.updateChannelConfig(channel.id, config);
+        toast.success(`${KIND_LABELS[kind]} channel updated`);
+      } else {
+        await api.createChannel(kind, config);
+        toast.success(`${KIND_LABELS[kind]} channel added`);
+      }
       setValues({});
-      onCreated();
+      onSaved();
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -144,16 +169,19 @@ function AddChannelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add alert channel</DialogTitle>
+          <DialogTitle>{editing ? "Edit alert channel" : "Add alert channel"}</DialogTitle>
           <DialogDescription>
-            New incidents are dispatched to every enabled channel (throttled per
-            token + source IP).
+            {editing
+              ? "Changes take effect on the next incident. Leave a secret blank to keep the stored value."
+              : "New incidents are dispatched to every enabled channel (throttled per token + source IP)."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label>Kind</Label>
-            <Select value={kind} onValueChange={setKind}>
+            {/* Kind defines the config shape; changing it would be a
+                different channel, so it is fixed once created. */}
+            <Select value={kind} onValueChange={setKind} disabled={editing}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -171,7 +199,7 @@ function AddChannelDialog({
               <Label>{f.label}</Label>
               <Input
                 type={f.secret ? "password" : f.number ? "number" : "text"}
-                placeholder={f.placeholder}
+                placeholder={editing && f.secret ? "unchanged" : f.placeholder}
                 value={values[f.key] ?? ""}
                 onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
               />
@@ -181,7 +209,7 @@ function AddChannelDialog({
         </div>
         <DialogFooter>
           <Button onClick={() => void create()} disabled={busy}>
-            {busy ? "adding…" : "Add channel"}
+            {busy ? "saving…" : editing ? "Save changes" : "Add channel"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -189,7 +217,15 @@ function AddChannelDialog({
   );
 }
 
-function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged: () => void }) {
+function ChannelCard({
+  channel,
+  onChanged,
+  onEdit,
+}: {
+  channel: AlertChannel;
+  onChanged: () => void;
+  onEdit: () => void;
+}) {
   const [busy, setBusy] = useState<"test" | "toggle" | null>(null);
 
   async function test() {
@@ -244,6 +280,9 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
             <Send className="h-3.5 w-3.5" />
             {busy === "test" ? "sending…" : "test"}
           </Button>
+          <Button variant="ghost" size="sm" disabled={busy !== null} onClick={onEdit}>
+            edit
+          </Button>
           <Switch
             checked={channel.enabled}
             disabled={busy !== null}
@@ -272,6 +311,7 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
 export function ChannelsPage() {
   const { data: channels, error, loading, reload } = usePoll<AlertChannel[]>(() => api.listChannels());
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<AlertChannel | null>(null);
   const list = channels ?? [];
 
   return (
@@ -285,7 +325,12 @@ export function ChannelsPage() {
       {error && <p className="text-sm text-danger">{error}</p>}
       <div className="space-y-2">
         {list.map((c) => (
-          <ChannelCard key={c.id} channel={c} onChanged={() => void reload()} />
+          <ChannelCard
+            key={c.id}
+            channel={c}
+            onChanged={() => void reload()}
+            onEdit={() => setEditing(c)}
+          />
         ))}
         {list.length === 0 && (
           <Card>
@@ -298,7 +343,13 @@ export function ChannelsPage() {
           </Card>
         )}
       </div>
-      <AddChannelDialog open={addOpen} onOpenChange={setAddOpen} onCreated={() => void reload()} />
+      <ChannelDialog open={addOpen} onOpenChange={setAddOpen} onSaved={() => void reload()} />
+      <ChannelDialog
+        open={editing !== null}
+        onOpenChange={(o) => !o && setEditing(null)}
+        onSaved={() => void reload()}
+        channel={editing}
+      />
     </section>
   );
 }

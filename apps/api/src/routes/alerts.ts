@@ -41,11 +41,14 @@ const channelConfigSchemas: Record<string, z.ZodType> = {
 
 const SECRET_KEY_RE = /pass|secret|token|key/i;
 
+/** Sentinel returned in place of a stored secret; never a real value. */
+export const SECRET_MASK = "•••";
+
 function maskSecrets(config: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(config).map(([k, v]) => [
       k,
-      SECRET_KEY_RE.test(k) && typeof v === "string" && v !== "" ? "•••" : v,
+      SECRET_KEY_RE.test(k) && typeof v === "string" && v !== "" ? SECRET_MASK : v,
     ]),
   );
 }
@@ -105,17 +108,58 @@ export function registerAlertRoutes(
   app.patch("/api/v1/alert-channels/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = z
-      .object({ enabled: z.boolean() })
+      .object({
+        enabled: z.boolean().optional(),
+        config: z.record(z.string(), z.unknown()).optional(),
+      })
+      .refine((b) => b.enabled !== undefined || b.config !== undefined, {
+        message: "nothing to update: provide enabled and/or config",
+      })
       .safeParse(request.body);
     if (!parsed.success) {
       return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
-    const result = db
-      .update(alertChannels)
-      .set({ enabled: parsed.data.enabled, failureCount: 0 })
+
+    const existing = db
+      .select()
+      .from(alertChannels)
       .where(eq(alertChannels.id, id))
-      .run();
-    if (result.changes === 0) return reply.notFound("channel not found");
+      .get();
+    if (!existing) return reply.notFound("channel not found");
+
+    const patch: { enabled?: boolean; failureCount?: number; config?: unknown } = {};
+    if (parsed.data.enabled !== undefined) {
+      // Re-enabling clears the circuit breaker, as before.
+      patch.enabled = parsed.data.enabled;
+      patch.failureCount = 0;
+    }
+
+    if (parsed.data.config) {
+      // Secrets are masked on read, so an edit form cannot echo them back.
+      // A field left at the mask (or omitted) keeps the stored value; a new
+      // value replaces it. Without this, saving an edited channel would
+      // write the literal mask string as the credential.
+      const stored = (existing.config ?? {}) as Record<string, unknown>;
+      const incoming = parsed.data.config;
+      const merged: Record<string, unknown> = { ...incoming };
+      for (const [k, v] of Object.entries(incoming)) {
+        if (SECRET_KEY_RE.test(k) && (v === SECRET_MASK || v === "" || v === undefined)) {
+          if (stored[k] !== undefined) merged[k] = stored[k];
+          else delete merged[k];
+        }
+      }
+      const schema = channelConfigSchemas[existing.kind];
+      if (!schema) return reply.badRequest(`unsupported kind: ${existing.kind}`);
+      const result = schema.safeParse(merged);
+      if (!result.success) {
+        return reply.badRequest(result.error.issues.map((i) => i.message).join("; "));
+      }
+      patch.config = result.data;
+      // A reconfigured channel deserves a fresh start on the breaker.
+      patch.failureCount = 0;
+    }
+
+    db.update(alertChannels).set(patch).where(eq(alertChannels.id, id)).run();
     return reply.send({ ok: true });
   });
 

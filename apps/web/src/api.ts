@@ -379,6 +379,15 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ enabled }),
     }),
+  /**
+   * Update a channel's settings. Secret fields left blank keep their stored
+   * value — the client never receives them, only a mask.
+   */
+  updateChannelConfig: (id: string, config: Record<string, unknown>) =>
+    request(`/alert-channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ config }),
+    }),
   testChannel: (id: string) =>
     request(`/alert-channels/${id}/test`, { method: "POST" }),
   deleteChannel: (id: string) =>
