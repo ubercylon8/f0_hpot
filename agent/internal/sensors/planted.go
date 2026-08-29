@@ -53,6 +53,20 @@ func (PlantedCredentialSensor) Start(ctx context.Context, cfg map[string]interfa
 	// older than mtime. Without this the sensor silently never fires.
 	armAtime(path)
 
+	// Ask the filesystem whether it will actually report reads, rather than
+	// assuming. This catches noatime mounts on Linux and the NTFS
+	// last-access updates that Windows disables by default — cases where
+	// the sensor still detects writes and deletions but is blind to the
+	// read it exists to catch. Probing beats guessing from GOOS.
+	if !readsAreDetectable(path) {
+		log.Printf("[planted_credential] WARNING: reads of %s cannot be detected on this "+
+			"filesystem (atime is not updated on read) — writes and deletion still alert. "+
+			"On Windows: fsutil behavior set disablelastaccess 0. On Linux: check for a "+
+			"noatime mount.", path)
+	}
+	// The probe read the file itself, so re-arm before taking the baseline.
+	armAtime(path)
+
 	baseline, err := statSignature(path)
 	if err != nil {
 		return err
@@ -175,4 +189,28 @@ func armAtime(path string) {
 		// turns this sensor into decoration.
 		log.Printf("[planted_credential] WARNING: cannot arm %s (%v) — reads of this bait will NOT be detected", path, err)
 	}
+}
+
+// readsAreDetectable reports whether reading the file moves its access
+// time on this filesystem. It arms the file, reads it, and looks: an
+// empirical answer, valid on any platform and any mount option.
+func readsAreDetectable(path string) bool {
+	armAtime(path)
+	before, err := statSignature(path)
+	if err != nil {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	buf := make([]byte, 1)
+	_, _ = f.Read(buf)
+	_ = f.Close()
+
+	after, err := statSignature(path)
+	if err != nil {
+		return false
+	}
+	return after != before
 }

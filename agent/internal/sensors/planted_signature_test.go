@@ -123,3 +123,46 @@ func TestArmAtimePutsAccessBehindModify(t *testing.T) {
 		t.Fatalf("arming changed mtime: %v -> %v", mtime, st.ModTime())
 	}
 }
+
+// The sensor must know whether this filesystem will report reads at all,
+// rather than inferring it from GOOS: a noatime mount on Linux and NTFS
+// with last-access updates disabled both leave the sensor blind to the
+// read it exists to catch, and both should be announced, not assumed.
+func TestReadsAreDetectableProbesTheFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bait.txt")
+	if err := os.WriteFile(path, []byte("vpn: admin / hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readsAreDetectable(path)
+
+	// On a normal Linux temp dir (relatime) the probe must succeed; where
+	// atime is unavailable it must report false rather than claim coverage.
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atimeOf(st) == "" {
+		if got {
+			t.Fatal("claimed read detection on a filesystem with no atime")
+		}
+		t.Skip("atime unavailable here; probe correctly reported false")
+	}
+	if runtime.GOOS == "linux" && !got {
+		t.Skip("atime present but not updated on read (noatime mount?) — probe returned false, which is the honest answer")
+	}
+	if !got {
+		t.Fatal("probe should detect reads on a filesystem that updates atime")
+	}
+
+	// The probe must leave the file armed for the real watch that follows.
+	armAtime(path)
+	st2, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atimeOf(st2) >= st2.ModTime().UTC().Format(time.RFC3339Nano) {
+		t.Fatal("file left unarmed after probing")
+	}
+}
