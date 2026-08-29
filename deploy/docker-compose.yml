@@ -73,9 +73,11 @@ services:
     ports:
       # Console: loopback by default (reach via ssh -L); set
       # CONSOLE_PUBLISH_IP to the public IP for public access.
-      # (Private mode serves :8080; public mode serves :80/:443 via ACME.)
+      # (Private mode serves :8080; public mode serves :443 via ACME.)
+      # No :80 publish — the gateway owns public :80 for token reach-backs
+      # (source IPs must arrive unproxied); the console cert uses the
+      # TLS-ALPN-01 challenge, which needs only :443.
       - "${CONSOLE_PUBLISH_IP:-127.0.0.1}:8080:8080"
-      - "${CONSOLE_PUBLISH_IP:-127.0.0.1}:80:80"
       # Token surface HTTPS (only used when TOKEN_TLS_MODE != http) and
       # public console (when CONSOLE_PUBLISH_IP is public).
       - "${GATEWAY_PUBLISH_IP:-0.0.0.0}:443:443"

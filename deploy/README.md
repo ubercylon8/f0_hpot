@@ -58,7 +58,7 @@ Verification runs `dig` against 8.8.8.8 per record with retry/skip/abort.
 |---|---|---|
 | Gateway (attacker reach-back) | public IP | 80/tcp (HTTP triggers), 53/udp (DNS), SMTP |
 | Token TLS (import/on-demand) | public IP | 443/tcp |
-| Console + API proxy | loopback (default) or public | 8080 (private) / 80+443 (public) |
+| Console + API proxy | loopback (default) or public | 8080 (private) / 443 (public; TLS-ALPN ACME — the gateway owns :80, so use `https://` explicitly) |
 | API | internal only | — |
 
 Private console access: `ssh -L 8080:127.0.0.1:8080 <user>@<host>` →

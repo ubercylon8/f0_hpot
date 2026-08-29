@@ -678,9 +678,11 @@ function renderCaddyfile() {
   const sp = spinner("rendering Caddyfile");
   const globalOpts =
     answers.acmeEmail ? `{\n\temail {$ACME_EMAIL}\n}\n\n` : "";
+  // Public console: the gateway owns host :80 (token reach-backs need raw
+  // source IPs), so HTTP-01 can never be answered — use TLS-ALPN-01 on :443.
   const consoleBlock =
     answers.consoleMode === "public"
-      ? `{$CONSOLE_DOMAIN} {\n\tencode gzip\n\thandle /api/* {\n\t\treverse_proxy {$API_ORIGIN}\n\t}\n\thandle {\n\t\troot * /srv/www\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}`
+      ? `{$CONSOLE_DOMAIN} {\n\ttls {\n\t\tissuer acme {\n\t\t\temail {$ACME_EMAIL}\n\t\t\tdisable_http_challenge\n\t\t}\n\t}\n\tencode gzip\n\thandle /api/* {\n\t\treverse_proxy {$API_ORIGIN}\n\t}\n\thandle {\n\t\troot * /srv/www\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}`
       : `:8080 {\n\tencode gzip\n\thandle /api/* {\n\t\treverse_proxy {$API_ORIGIN}\n\t}\n\thandle {\n\t\troot * /srv/www\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}`;
 
   let tokenBlock = "";
