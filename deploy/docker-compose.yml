@@ -30,7 +30,11 @@ services:
       # GeoIP .mmdb (optional, mounted read-only when present)
       - ./data:/geoip:ro
       # Agent release binaries (built or fetched by the installer)
-      - ./release-bin:/release-bin:ro
+      # Writable: the console's own features write here — `build binaries`
+      # cross-compiles into it and code signing replaces each binary with
+      # its signed copy. Mounted read-only, signing failed with EROFS.
+      # Only the API mounts this; the attacker-facing gateway does not.
+      - ./release-bin:/release-bin
     expose:
       - "8443"
 
