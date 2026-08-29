@@ -127,11 +127,21 @@ export interface AuthKeyRow {
   lastUsedAt: string | null;
 }
 
+export interface Capabilities {
+  buildReleases: boolean;
+  releaseDir: boolean;
+  releaseSigning: boolean;
+  codeSigning: boolean;
+  reasons: Record<string, string>;
+}
+
 export interface ServerStatus {
   geoipEnabled: boolean;
   authOpenMode: boolean;
   enrollmentConfigured: boolean;
   alertThrottlePerMinute: number;
+  /** Host-dependent actions; absent on older APIs, so treat as available. */
+  capabilities?: Capabilities;
 }
 
 export interface ReleaseKeyRow {

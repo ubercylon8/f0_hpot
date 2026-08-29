@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { DownloadCloud, Hammer, KeyRound, Plus, RefreshCw, ShieldCheck, Terminal, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, downloadFile, type AgentRow, type CodeSignCertRow, type DeploymentRow, type EnrollmentTokenRow, type ReleaseKeyRow, type TokenRow } from "../api.js";
+import { api, downloadFile, type AgentRow, type Capabilities, type CodeSignCertRow, type DeploymentRow, type EnrollmentTokenRow, type ReleaseKeyRow, type TokenRow } from "../api.js";
 import { usePoll } from "@/lib/use-poll";
 import { timeAgo } from "@/lib/time";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -505,6 +505,8 @@ function ReleasesCard() {
   const [busy, setBusy] = useState(false);
   const sel = useSelection();
 
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+
   const reload = () =>
     api
       .listReleases()
@@ -515,7 +517,13 @@ function ReleasesCard() {
       .catch(() => {});
   useEffect(() => {
     void reload();
+    // Host-dependent actions: an older API omits this, so treat it as
+    // available rather than disabling a button that would have worked.
+    api.getStatus().then((st) => setCaps(st.capabilities ?? null)).catch(() => {});
   }, []);
+
+  const canBuild = caps?.buildReleases ?? true;
+  const buildBlockedReason = caps?.reasons?.["buildReleases"];
 
   async function build() {
     if (!version.trim()) {
@@ -561,12 +569,21 @@ function ReleasesCard() {
             onChange={(e) => setVersion(e.target.value)}
             className="h-8 w-36 font-mono"
           />
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void build()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !canBuild}
+            title={canBuild ? undefined : buildBlockedReason}
+            onClick={() => void build()}
+          >
             <Hammer className="h-3.5 w-3.5" />
             {busy ? "building…" : "build binaries"}
           </Button>
           {busy && (
             <span className="text-xs text-faint">cross-compiling 5 platforms, ~1 min</span>
+          )}
+          {!canBuild && buildBlockedReason && (
+            <span className="text-xs text-faint">unavailable — {buildBlockedReason}</span>
           )}
         </div>
         {sel.sel.size > 0 && (
@@ -656,8 +673,13 @@ function CodeSigningCard() {
   const [busy, setBusy] = useState(false);
   const sel = useSelection();
 
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  const canSign = caps?.codeSigning ?? true;
+  const signBlockedReason = caps?.reasons?.["codeSigning"];
+
   const reload = () => api.listCodeSignCerts().then(setCerts).catch(() => setCerts([]));
   useEffect(() => {
+    api.getStatus().then((st) => setCaps(st.capabilities ?? null)).catch(() => {});
     void reload();
   }, []);
 
@@ -704,6 +726,11 @@ function CodeSigningCard() {
           SmartScreen/ASR accept it. Distinct from the Ed25519 update-manifest
           keys above: those keep <em>updates</em> honest — this gets the binary{" "}
           <em>running</em> on org endpoints where the cert is deployed.
+          {!canSign && signBlockedReason && (
+            <span className="mt-1.5 block text-danger">
+              Signing is unavailable here — {signBlockedReason}.
+            </span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -754,7 +781,8 @@ function CodeSigningCard() {
             <Button
               size="sm"
               variant="outline"
-              disabled={busy}
+              disabled={busy || !canSign}
+              title={canSign ? undefined : signBlockedReason}
               onClick={() => {
                 setBusy(true);
                 void api

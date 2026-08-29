@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { capabilities } from "../capabilities.js";
 
 export interface StatusDeps {
   geoEnabled: boolean;
@@ -16,5 +17,8 @@ export function registerStatusRoutes(app: FastifyInstance, deps: StatusDeps): vo
     authOpenMode: deps.isOpenMode(),
     enrollmentConfigured: !!process.env.F0_ENROLLMENT_TOKEN,
     alertThrottlePerMinute: Number(process.env.F0_MAX_ALERTS_PER_MINUTE ?? 1),
+    // Host-dependent console actions; the UI disables what cannot work here
+    // instead of letting the button fail with an opaque 400.
+    capabilities: capabilities(),
   }));
 }
