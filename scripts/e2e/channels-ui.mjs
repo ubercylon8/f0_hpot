@@ -223,7 +223,8 @@ try {
       await d.locator("input").nth(2).fill("e2e-syslog");
     });
     await card(page, `127.0.0.1:${udp.port}`).getByRole("button", { name: "test" }).click();
-    await page.waitForSelector("text=test alert delivered via syslog");
+    // syslog is UDP fire-and-forget; the console no longer claims delivery.
+    await page.waitForSelector("text=test datagram sent");
     const msgs = await until(
       () => udp.messages.filter((m) => m.includes("test00000000")),
       "syslog datagram",
@@ -287,7 +288,9 @@ try {
     for (;;) {
       const del = page.getByRole("button", { name: "delete", exact: true }).first();
       if ((await del.count()) === 0) break;
+      // Two-step now: arm, then confirm.
       await del.click();
+      await page.getByRole("button", { name: "confirm delete" }).first().click();
       await page.waitForSelector("text=channel deleted");
       await page.waitForTimeout(300);
     }

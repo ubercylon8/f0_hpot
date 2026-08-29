@@ -97,18 +97,22 @@ try {
     await dialog.locator('code:has-text("f0et_")').waitFor();
     await dialog.locator(`text=using new token "e2e-install-${RUN}"`).waitFor();
     // delete it from the managed list
-    await dialog
-      .locator("div.flex.items-center.gap-3", { hasText: `e2e-install-${RUN}` })
-      .getByRole("button", { name: "delete" })
-      .click();
+    // Destructive controls are two-step now: arm, then confirm.
+    const tokRow = dialog.locator("div.flex.items-center.gap-3", {
+      hasText: `e2e-install-${RUN}`,
+    });
+    await tokRow.getByRole("button", { name: "delete", exact: true }).click();
+    await tokRow.getByRole("button", { name: "confirm delete" }).click();
     await page.waitForSelector(`text=token "e2e-install-${RUN}" deleted`);
     // OS picker changes the one-liner accordingly
     await dialog.getByRole("combobox").first().click();
     await page.getByRole("option", { name: "Windows · amd64" }).click();
     await dialog.locator('code:has-text("iwr -Uri")').waitFor();
     await dialog.locator('code:has-text("f0-deception-agent-windows-amd64.exe")').waitFor();
-    if ((await dialog.locator('code:has-text("--install")').count()) !== 0) {
-      throw new Error("windows one-liner must not use --install (service stub)");
+    // Windows has a real service installer now, so the one-liner uses
+    // --install like every other platform.
+    if ((await dialog.locator('code:has-text("--install")').count()) === 0) {
+      throw new Error("windows one-liner should use --install (service is implemented)");
     }
     await dialog.getByRole("combobox").first().click();
     await page.getByRole("option", { name: "macOS · Apple Silicon" }).click();
@@ -202,6 +206,7 @@ try {
       .locator("span.font-mono", { hasText: "f0-deception-agent-darwin-arm64" })
       .locator("..");
     await row.getByTitle(/delete /).click();
+    await row.getByRole("button", { name: "confirm delete" }).click();
     await page.waitForSelector("text=deleted f0-deception-agent-darwin-arm64");
     // span.font-mono scopes out the toast text itself
     if ((await page.locator("span.font-mono", { hasText: "f0-deception-agent-darwin-arm64" }).count()) !== 0) {

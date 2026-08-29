@@ -27,9 +27,14 @@ pnpm build                   # turbo build all
 pnpm test                    # turbo test all
 pnpm typecheck               # tsc --noEmit everywhere
 pnpm dev                     # parallel dev servers
-pnpm e2e                     # Playwright UI suite (all 16 token types, create/config/
-                             # download/trigger) — needs the demo stack running and
-                             # F0_E2E_KEY=<console api key>; see scripts/e2e/tokens-ui.mjs
+pnpm e2e                     # Playwright UI suite (63 checks across 6 pages) — needs the
+                             # demo stack running AND seeded:
+                             #   F0_E2E_ADMIN=<F0_ADMIN_TOKEN> F0_DB_PATH=<demo db> \
+                             #     node scripts/e2e/seed.mjs      # prints F0_E2E_KEY
+                             #   export F0_E2E_KEY=... F0_E2E_ENROLL=<F0_ENROLLMENT_TOKEN>
+                             # The suites assume a demo-console key, an enrolled agent and
+                             # three alert channels; without the seed they fail in ways that
+                             # look like product bugs.
 
 # smoke run (local, no root ports):
 F0_DB_PATH=/tmp/f0.db F0_API_PORT=18443 npx tsx src/server.ts   # in apps/api

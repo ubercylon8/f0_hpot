@@ -74,8 +74,10 @@ try {
   await check("API key list shows the current key with a last-used time", async () => {
     const keys = card(page, "API keys");
     await keys.locator("text=demo-console").waitFor();
-    // the key driving this very session can never show "never"
-    if ((await keys.locator("text=never").count()) !== 0) {
+    // Scope to the demo-console row: any other never-used key in the list
+    // (debris from an earlier run) would otherwise fail this assertion.
+    const demoRow = keys.locator("div", { hasText: "demo-console" }).last();
+    if ((await demoRow.locator("text=never").count()) !== 0) {
       throw new Error("demo key shows never-used despite driving the console");
     }
   });
@@ -96,7 +98,9 @@ try {
   await check("revoke removes the key from the list", async () => {
     const keys = card(page, "API keys");
     const row = keys.locator("div", { hasText: `e2e-${RUN}` }).last();
-    await row.getByRole("button", { name: "revoke" }).click();
+    // Two-step now: revoking the key you are using is a footgun.
+    await row.getByRole("button", { name: "revoke", exact: true }).click();
+    await row.getByRole("button", { name: "confirm revoke" }).click();
     await page.waitForSelector(`text=key "e2e-${RUN}" revoked`);
     await page.waitForTimeout(600);
     if ((await keys.locator(`text=e2e-${RUN}`).count()) !== 0) {
