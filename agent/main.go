@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -120,6 +122,7 @@ func runAgent(ctx context.Context, state config.State) {
 	sensors.Register(sensors.RDPSensor{})
 	sensors.Register(sensors.PlantedCredentialSensor{})
 	sensors.Register(sensors.FileWatchSensor{})
+	defer sensors.StopAll()
 	update.SetVersion(version)
 
 	poll := 60 * time.Second
@@ -191,12 +194,25 @@ func toSensors(in []api.SensorSpec) []sensors.SensorSpec {
 	return out
 }
 
+// specsEqual decides whether the delivered sensor set differs from what is
+// running. Config must be part of the comparison: a port/path/token_id edit
+// in the console changes neither kind nor enabled, and comparing only those
+// left the agent running the old config indefinitely while the console
+// showed the new one as deployed.
 func specsEqual(a, b []api.SensorSpec) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		if a[i].Kind != b[i].Kind || a[i].Enabled != b[i].Enabled {
+			return false
+		}
+		// JSON-encode for a stable deep compare: config comes off the wire as
+		// map[string]interface{}, and Go's map iteration order is randomised,
+		// so encoding/json's sorted keys give a canonical form.
+		ja, errA := json.Marshal(a[i].Config)
+		jb, errB := json.Marshal(b[i].Config)
+		if errA != nil || errB != nil || !bytes.Equal(ja, jb) {
 			return false
 		}
 	}

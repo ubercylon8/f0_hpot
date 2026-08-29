@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
 	"log"
@@ -17,10 +18,10 @@ type RDPSensor struct{}
 
 func (RDPSensor) Name() string { return "rdp" }
 
-func (RDPSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (RDPSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 3389)
 	tokenID := str(cfg, "token_id", "")
-	return serveTCPSensor("rdp", port, tokenID, handleRDPConn, report)
+	return serveTCPSensor(ctx, "rdp", port, tokenID, handleRDPConn, report)
 }
 
 func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {

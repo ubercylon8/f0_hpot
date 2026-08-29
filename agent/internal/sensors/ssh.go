@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -15,7 +16,7 @@ type SSHSensor struct{}
 
 func (SSHSensor) Name() string { return "ssh" }
 
-func (SSHSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (SSHSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 2222)
 	tokenID := str(cfg, "token_id", "")
 	banner := str(cfg, "banner", "SSH-2.0-OpenSSH_9.6")
@@ -69,5 +70,14 @@ func (SSHSensor) Start(cfg map[string]interface{}, report Reporter) error {
 	}
 
 	log.Printf("[ssh] listening on :%d (accepts all credentials)", port)
-	return server.ListenAndServe()
+	go func() {
+		<-ctx.Done()
+		_ = server.Close()
+	}()
+	err := server.ListenAndServe()
+	if ctx.Err() != nil {
+		log.Printf("[ssh] stopped")
+		return nil
+	}
+	return err
 }

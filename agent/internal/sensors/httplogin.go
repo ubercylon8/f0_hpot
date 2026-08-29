@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -31,7 +32,7 @@ func intVal(cfg map[string]interface{}, key string, def int) int {
 	return def
 }
 
-func (HTTPLoginSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (HTTPLoginSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 8081)
 	tokenID := str(cfg, "token_id", "")
 	appName := str(cfg, "app_name", "Router Admin")
@@ -90,7 +91,16 @@ func (HTTPLoginSensor) Start(cfg map[string]interface{}, report Reporter) error 
 		MaxHeaderBytes:    8 * 1024,
 	}
 	log.Printf("[http_login] serving fake %q login on :%d", appName, port)
-	return srv.ListenAndServe()
+	go func() {
+		<-ctx.Done()
+		_ = srv.Close()
+	}()
+	err := srv.ListenAndServe()
+	if ctx.Err() != nil {
+		log.Printf("[http_login] stopped")
+		return nil
+	}
+	return err
 }
 
 func baseDetail(r *http.Request) map[string]interface{} {

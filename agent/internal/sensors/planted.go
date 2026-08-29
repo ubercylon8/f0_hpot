@@ -1,9 +1,11 @@
 package sensors
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -18,7 +20,7 @@ type PlantedCredentialSensor struct{}
 
 func (PlantedCredentialSensor) Name() string { return "planted_credential" }
 
-func (PlantedCredentialSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (PlantedCredentialSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	path := str(cfg, "path", "")
 	if path == "" {
 		return logAndErr("planted_credential requires 'path'")
@@ -50,7 +52,12 @@ func (PlantedCredentialSensor) Start(cfg map[string]interface{}, report Reporter
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 		cur, err := statSignature(path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -66,14 +73,22 @@ func (PlantedCredentialSensor) Start(cfg map[string]interface{}, report Reporter
 			continue
 		}
 		if cur != baseline {
+			// mtime unchanged but the signature moved => the file was read,
+			// not written. Worth distinguishing: a read is the classic
+			// credential-harvesting signal, a write is tampering.
+			access := "bait_file_read"
+			if mtimePart(cur) != mtimePart(baseline) {
+				access = "bait_file_modified"
+			}
 			detail := map[string]interface{}{
 				"event":  "bait_file_touched",
+				"access": access,
 				"label":  label,
 				"path":   path,
 				"before": baseline,
 				"after":  cur,
 			}
-			log.Printf("[planted_credential] %s touched (%s -> %s)", label, baseline, cur)
+			log.Printf("[planted_credential] %s %s (%s -> %s)", label, access, baseline, cur)
 			baseline = cur
 			report(Trigger{
 				Sensor:   "planted_credential",
@@ -84,15 +99,19 @@ func (PlantedCredentialSensor) Start(cfg map[string]interface{}, report Reporter
 			})
 		}
 	}
-	return nil
 }
 
+// statSignature covers access time as well as modification time: the point
+// of a planted credential is to catch someone *reading* it, and a read moves
+// only atime. (The sensor backdates atime when planting so the first read
+// registers even under relatime.) Where atime is unavailable — Windows, or a
+// noatime mount — atimeOf returns "" and this degrades to mtime-only.
 func statSignature(path string) (string, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
-	return st.ModTime().UTC().Format(time.RFC3339Nano), nil
+	return st.ModTime().UTC().Format(time.RFC3339Nano) + "|" + atimeOf(st), nil
 }
 
 func defaultBaitContent(label string) string {
@@ -113,3 +132,11 @@ type configError string
 func (e configError) Error() string { return string(e) }
 
 func errConfig(msg string) error { return configError(msg) }
+
+// mtimePart returns the modification-time half of a statSignature.
+func mtimePart(sig string) string {
+	if i := strings.IndexByte(sig, '|'); i >= 0 {
+		return sig[:i]
+	}
+	return sig
+}

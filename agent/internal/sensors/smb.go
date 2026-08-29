@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -17,10 +18,10 @@ type SMBSensor struct{}
 
 func (SMBSensor) Name() string { return "smb" }
 
-func (SMBSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (SMBSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 445)
 	tokenID := str(cfg, "token_id", "")
-	return serveTCPSensor("smb", port, tokenID, handleSMBConn, report)
+	return serveTCPSensor(ctx, "smb", port, tokenID, handleSMBConn, report)
 }
 
 func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {

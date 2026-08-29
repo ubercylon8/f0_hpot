@@ -3,6 +3,7 @@
 package sensors
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -24,8 +25,10 @@ type Reporter func(Trigger)
 // Sensor is one runnable deception component.
 type Sensor interface {
 	Name() string
-	// Start runs the sensor; it must return promptly on ctx cancellation.
-	Start(cfg map[string]interface{}, report Reporter) error
+	// Start runs the sensor and blocks until it fails or ctx is cancelled.
+	// It must release its listeners/tickers before returning, so the next
+	// generation can bind the same ports.
+	Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error
 }
 
 var (
@@ -56,8 +59,33 @@ type SensorSpec struct {
 	Config  map[string]interface{} `json:"config"`
 }
 
-// StartAll launches every enabled spec; failures are logged, not fatal.
+// Generation bookkeeping: StartAll replaces the running set wholesale, so the
+// previous generation must be stopped and *waited for* before the new one
+// binds. Without the wait, the old listeners keep their ports and every
+// re-deploy leaves the new sensors dying with "address already in use".
+var (
+	runMu     sync.Mutex
+	runCancel context.CancelFunc
+	runWG     *sync.WaitGroup
+)
+
+// shutdownGrace bounds how long we wait for a generation to release its
+// ports. A wedged sensor must not stall the heartbeat loop forever.
+const shutdownGrace = 10 * time.Second
+
+// StartAll stops the currently running sensors, waits for them to release
+// their resources, then launches every enabled spec. Failures are logged,
+// not fatal.
 func StartAll(specs []SensorSpec, report Reporter) {
+	runMu.Lock()
+	defer runMu.Unlock()
+
+	stopCurrentLocked()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := &sync.WaitGroup{}
+	runCancel, runWG = cancel, wg
+
 	for _, spec := range specs {
 		if !spec.Enabled {
 			continue
@@ -67,10 +95,37 @@ func StartAll(specs []SensorSpec, report Reporter) {
 			log.Printf("sensor %q not available in this build", spec.Kind)
 			continue
 		}
+		wg.Add(1)
 		go func(sensor Sensor, cfg map[string]interface{}) {
-			if err := sensor.Start(cfg, report); err != nil {
+			defer wg.Done()
+			if err := sensor.Start(ctx, cfg, report); err != nil {
 				log.Printf("sensor %s stopped: %v", sensor.Name(), err)
 			}
 		}(sensor, spec.Config)
 	}
+}
+
+// StopAll shuts the running sensors down and waits for them.
+func StopAll() {
+	runMu.Lock()
+	defer runMu.Unlock()
+	stopCurrentLocked()
+}
+
+func stopCurrentLocked() {
+	if runCancel == nil {
+		return
+	}
+	runCancel()
+	done := make(chan struct{})
+	go func() {
+		runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(shutdownGrace):
+		log.Printf("sensors: shutdown timed out after %s; ports may still be held", shutdownGrace)
+	}
+	runCancel, runWG = nil, nil
 }

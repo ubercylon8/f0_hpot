@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"context"
 	"log"
 	"os"
 	"time"
@@ -16,7 +17,7 @@ type FileWatchSensor struct{}
 
 func (FileWatchSensor) Name() string { return "file_watch" }
 
-func (FileWatchSensor) Start(cfg map[string]interface{}, report Reporter) error {
+func (FileWatchSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	path := str(cfg, "path", "")
 	if path == "" {
 		return logAndErr("file_watch requires 'path'")
@@ -48,7 +49,12 @@ func (FileWatchSensor) Start(cfg map[string]interface{}, report Reporter) error 
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 		cur, err := sig()
 		if err != nil {
 			continue // transient errors ignored; deletion of watched system file isn't our alert
@@ -69,5 +75,4 @@ func (FileWatchSensor) Start(cfg map[string]interface{}, report Reporter) error 
 			})
 		}
 	}
-	return nil
 }
