@@ -96,6 +96,7 @@ func main() {
 // the foreground process and the Windows service share one code path.
 func runAgent(ctx context.Context, state config.State) {
 	client := api.New(state.ServerURL, state.AgentID, state.AgentKey)
+	client.Version = version
 
 	report := func(t sensors.Trigger) {
 		detail := t.Detail

@@ -82,3 +82,44 @@ func TestMtimePartHandlesMissingAtime(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// Under relatime (the Linux default) the kernel refreshes atime only when
+// it is already older than mtime. A bait file the sensor did not create —
+// or one it already detected a read on — therefore stops firing unless the
+// trap is re-armed. This is the difference between a working tripwire and
+// one that silently never triggers.
+func TestArmAtimePutsAccessBehindModify(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("atime is a stub on windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "passwords.txt")
+	if err := os.WriteFile(path, []byte("vpn: admin / hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the failure case: a file whose atime is NEWER than its mtime,
+	// exactly what a previously-read bait file looks like.
+	mtime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, time.Now(), mtime); err != nil {
+		t.Fatal(err)
+	}
+
+	armAtime(path)
+
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atime := atimeOf(st)
+	if atime == "" {
+		t.Skip("atime unavailable on this filesystem")
+	}
+	if !(atime < st.ModTime().UTC().Format(time.RFC3339Nano)) {
+		t.Fatalf("atime %q must be older than mtime %q after arming", atime, st.ModTime())
+	}
+	// mtime must survive untouched: moving it would read as tampering and
+	// flip the read-vs-modified classification.
+	if !st.ModTime().Equal(mtime) {
+		t.Fatalf("arming changed mtime: %v -> %v", mtime, st.ModTime())
+	}
+}

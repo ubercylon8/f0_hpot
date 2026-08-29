@@ -49,6 +49,36 @@ describe("agent revocation signalling", () => {
       payload: { agent_id: id },
     });
 
+  it("refreshes the reported version on every heartbeat", async () => {
+    // Version was captured at enrollment only, so an upgraded fleet kept
+    // showing the version it first enrolled with.
+    const { app, agentId, agentKey } = await enrolledServer();
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/heartbeat",
+        headers: { authorization: `Bearer ${agentKey}`, "x-agent-id": agentId },
+        payload: { agent_id: agentId, version: "9.9.9-upgraded" },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/v1/agents" });
+      const row = (list.json() as { id: string; version: string }[]).find((a) => a.id === agentId);
+      expect(row?.version).toBe("9.9.9-upgraded");
+
+      // An agent that reports no version keeps the one on record.
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/agent/heartbeat",
+        headers: { authorization: `Bearer ${agentKey}`, "x-agent-id": agentId },
+        payload: { agent_id: agentId },
+      });
+      const after = await app.inject({ method: "GET", url: "/api/v1/agents" });
+      const row2 = (after.json() as { id: string; version: string }[]).find((a) => a.id === agentId);
+      expect(row2?.version).toBe("9.9.9-upgraded");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("answers a retired agent with 410 and a revoked marker", async () => {
     const { app, agentId, agentKey } = await enrolledServer();
     try {

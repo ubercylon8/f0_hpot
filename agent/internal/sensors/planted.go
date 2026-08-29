@@ -45,6 +45,12 @@ func (PlantedCredentialSensor) Start(ctx context.Context, cfg map[string]interfa
 		log.Printf("[planted_credential] planted bait at %s", path)
 	}
 
+	// Arm the trap even when the file already existed — a bait file we did
+	// not create (or one left over from a previous run) has whatever atime
+	// it happens to have, and relatime only refreshes atime when it is
+	// older than mtime. Without this the sensor silently never fires.
+	armAtime(path)
+
 	baseline, err := statSignature(path)
 	if err != nil {
 		return err
@@ -89,6 +95,16 @@ func (PlantedCredentialSensor) Start(ctx context.Context, cfg map[string]interfa
 				"after":  cur,
 			}
 			log.Printf("[planted_credential] %s %s (%s -> %s)", label, access, baseline, cur)
+			// Re-arm: under relatime the kernel will not refresh atime
+			// again until it is older than mtime, so without this the
+			// sensor detects the first read and then goes blind for up to
+			// 24 hours.
+			if access == "bait_file_read" {
+				armAtime(path)
+			}
+			if s, err := statSignature(path); err == nil {
+				cur = s
+			}
 			baseline = cur
 			report(Trigger{
 				Sensor:   "planted_credential",
@@ -139,4 +155,17 @@ func mtimePart(sig string) string {
 		return sig[:i]
 	}
 	return sig
+}
+
+// armAtime pushes atime behind mtime so the next read is guaranteed to
+// move it, which is what relatime keys off. mtime is preserved exactly:
+// changing it would look like tampering and would flip the sensor's
+// read-vs-modified classification.
+func armAtime(path string) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	mtime := st.ModTime()
+	_ = os.Chtimes(path, mtime.Add(-1*time.Hour), mtime)
 }

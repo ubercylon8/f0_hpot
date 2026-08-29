@@ -17,6 +17,7 @@ type Client struct {
 	ServerURL string
 	AgentID   string
 	AgentKey  string
+	Version   string
 	http      *http.Client
 }
 
@@ -93,7 +94,10 @@ type DeploymentResult struct {
 // Heartbeat reports liveness (plus any deployment results from previous
 // work) and returns current sensor configuration and pending deployments.
 func (c *Client) Heartbeat(results []DeploymentResult) (pollIntervalSeconds int, sensors []SensorSpec, deployments []Deployment, err error) {
-	body := map[string]interface{}{"agent_id": c.AgentID}
+	// Report the running version every beat. It used to be sent only at
+	// enrollment, so the console kept showing whatever version first
+	// enrolled — an upgraded fleet still looked unpatched.
+	body := map[string]interface{}{"agent_id": c.AgentID, "version": c.Version}
 	if len(results) > 0 {
 		body["deployment_results"] = results
 	}

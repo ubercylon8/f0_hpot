@@ -87,6 +87,7 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     const body = z
       .object({
         agent_id: z.string().min(1),
+        version: z.string().max(32).optional(),
         deployment_results: z
           .array(
             z.object({
@@ -121,7 +122,14 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     }
 
     db.update(agents)
-      .set({ status: "online", lastSeenAt: new Date().toISOString() })
+      .set({
+        status: "online",
+        lastSeenAt: new Date().toISOString(),
+        // Refresh on every beat: recorded only at enrollment, it went stale
+        // the moment an agent was upgraded, so the fleet list showed old
+        // versions for hosts that were already patched.
+        ...(body.data.version ? { version: body.data.version } : {}),
+      })
       .where(eq(agents.id, agent.id))
       .run();
 
