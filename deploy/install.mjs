@@ -340,7 +340,13 @@ async function aptInstall(pkgs, label) {
 }
 
 function log(line) {
-  writeFileSync(LOG_PATH, `${new Date().toISOString()} ${line}\n`, { flag: "a" });
+  // Best-effort: a broken log file (wrong owner, full disk) must never
+  // take down the install itself.
+  try {
+    writeFileSync(LOG_PATH, `${new Date().toISOString()} ${line}\n`, { flag: "a" });
+  } catch {
+    /* ignore */
+  }
 }
 
 const FQDN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
