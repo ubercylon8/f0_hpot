@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // UpdatePublicKey is injected via -ldflags -X update.UpdatePublicKey=<b64>.
@@ -99,12 +100,43 @@ func VerifyFile(m *Manifest, name string, path string) error {
 
 // Apply atomically replaces targetPath with the verified new binary.
 func Apply(targetPath, newPath string) error {
-	dir := filepath.Dir(targetPath)
-	if err := os.Rename(newPath, targetPath); err != nil {
-		return err
+	// Windows refuses to overwrite or delete a running executable, but it
+	// will rename one. Move the current binary aside, install over the now
+	// free name, and roll back if the second rename fails. CleanupOld
+	// removes the leftover on the next start.
+	if runtime.GOOS == "windows" {
+		aside := targetPath + ".old"
+		_ = os.Remove(aside)
+		if err := os.Rename(targetPath, aside); err != nil {
+			return fmt.Errorf("update: move running binary aside: %w", err)
+		}
+		if err := os.Rename(newPath, targetPath); err != nil {
+			_ = os.Rename(aside, targetPath)
+			return fmt.Errorf("update: install new binary: %w", err)
+		}
+		return os.Chmod(targetPath, 0o755)
 	}
-	_ = dir
+
+	if err := os.Rename(newPath, targetPath); err != nil {
+		return fmt.Errorf("update: install new binary: %w", err)
+	}
 	return os.Chmod(targetPath, 0o755)
+}
+
+// CleanupOld removes the binary displaced by a previous Windows update.
+// Safe (and a no-op) everywhere else.
+func CleanupOld(targetPath string) {
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(targetPath + ".old")
+	}
+}
+
+// StagingDir is where a downloaded artifact must land before Apply renames
+// it into place. It has to be the target's own directory: os.Rename cannot
+// cross filesystems, and /tmp is a separate mount on most Linux installs,
+// which made every update fail with EXDEV.
+func StagingDir(targetPath string) string {
+	return filepath.Dir(targetPath)
 }
 
 func sha256Hex(data []byte) string {

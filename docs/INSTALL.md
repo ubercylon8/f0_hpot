@@ -156,8 +156,20 @@ openssl pkey -in release.key -pubout -out release.pub
 cd agent && RELEASE_PRIVKEY=../release.key make release
 # upload bin/ + bin/release-manifest.json to a URL, then:
 export F0_UPDATE_MANIFEST_URL=https://your.cdn/release-manifest.json
-# embed pub key into future agent builds:
-go build -ldflags "-X update.UpdatePublicKey=$(base64 -w0 release.pub)" .
+# embed pub key into future agent builds.
+#
+# Two things this line gets wrong if you shorten it:
+#   * -X needs the FULL import path, not "update.…", or the symbol is
+#     silently not matched and the updater is a permanent no-op.
+#   * the key must be the RAW 32 bytes, not the PEM. base64-ing release.pub
+#     directly yields "public key has wrong size" at runtime.
+PUB=$(openssl pkey -in release.key -pubout -outform DER | tail -c 32 | base64 -w0)
+go build -ldflags "-X github.com/f0rt1ka/f0-deception-agent/internal/update.UpdatePublicKey=$PUB" .
 ```
 
-Running agents fetch, verify, swap, and restart themselves hourly.
+Running agents fetch, verify, swap and restart themselves once per poll
+interval (default 60s — not hourly).
+
+Note the manifest cannot be served from the console API: `GET
+/api/v1/agent-releases/:file` only matches `f0-deception-agent-*`, so
+`release-manifest.json` returns 400. Host it on any static server.

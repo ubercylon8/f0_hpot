@@ -52,7 +52,9 @@ func FetchAndApply(manifestURL, fileName, currentBinary string) (*Manifest, erro
 	if bres.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("update: artifact HTTP %d", bres.StatusCode)
 	}
-	tmp, err := os.CreateTemp("", "f0-update-*")
+	// Stage in the target's own directory: os.Rename cannot cross
+	// filesystems, and /tmp is its own mount on most Linux installs.
+	tmp, err := os.CreateTemp(StagingDir(currentBinary), "f0-update-*")
 	if err != nil {
 		return nil, err
 	}

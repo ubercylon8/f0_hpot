@@ -125,6 +125,14 @@ func runAgent(ctx context.Context, state config.State) {
 	defer sensors.StopAll()
 	update.SetVersion(version)
 
+	// os.Args[0] is whatever the caller typed; resolve the real path so the
+	// updater stages next to (and replaces) the actual binary.
+	self, err := os.Executable()
+	if err != nil {
+		self = os.Args[0]
+	}
+	update.CleanupOld(self)
+
 	poll := 60 * time.Second
 	var currentSpecs []api.SensorSpec
 	var pendingResults []api.DeploymentResult
@@ -162,7 +170,7 @@ func runAgent(ctx context.Context, state config.State) {
 		}
 		// Signed self-update check (no-op without embedded public key).
 		if updateURL := os.Getenv("F0_UPDATE_MANIFEST_URL"); updateURL != "" {
-			if m, err := update.FetchAndApply(updateURL, "f0-deception-agent-"+runtime.GOOS+"-"+runtime.GOARCH, os.Args[0]); err != nil {
+			if m, err := update.FetchAndApply(updateURL, releaseArtifactName(), self); err != nil {
 				log.Printf("self-update: %v", err)
 			} else if m != nil {
 				log.Printf("updated to %s; restarting", m.Version)
@@ -178,12 +186,16 @@ func runAgent(ctx context.Context, state config.State) {
 	}
 }
 
-func execSelf() {
-	exe, err := os.Executable()
-	if err != nil {
-		return
+// releaseArtifactName is the manifest key for this platform's binary. It
+// must match what the release build produces — including the .exe suffix on
+// Windows, whose absence meant the Windows manifest entry was never
+// requested and self-update silently did nothing.
+func releaseArtifactName() string {
+	name := "f0-deception-agent-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		name += ".exe"
 	}
-	_ = syscall.Exec(exe, os.Args, os.Environ())
+	return name
 }
 
 func toSensors(in []api.SensorSpec) []sensors.SensorSpec {
