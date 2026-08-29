@@ -107,23 +107,28 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 	_, _ = conn.Write(ccf)
 	time.Sleep(200 * time.Millisecond)
 
-	report(Trigger{
-		Sensor:   "rdp",
-		TokenID:  tokenID,
-		Severity: "medium",
-		Detail:   detail,
-		SeenAt:   time.Now().UTC(),
-	})
-
-	// NLA/CredSSP: upgrade to TLS and capture the NTLM exchange.
+	// NLA/CredSSP: upgrade to TLS and capture the NTLM exchange. The
+	// credential capture is the incident worth having, so only fall back to
+	// reporting the bare connection when that path is not taken.
 	if requested == "credssp(nla)" || requested == "tls+credssp" {
 		tlsConn := upgradeRDPToTLS(conn)
 		if tlsConn != nil {
+			report(Trigger{
+				Sensor:   "rdp",
+				TokenID:  tokenID,
+				Severity: "medium",
+				Detail:   detail,
+				SeenAt:   time.Now().UTC(),
+			})
 			handleRDPCredSSP(tlsConn, tokenID, report)
 			return
 		}
 	}
 
+	// One incident per connection. This used to fire twice with identical
+	// detail — medium then high — inflating incident counts for a single
+	// probe. A client that never offers NLA is the more interesting case,
+	// so it keeps the high severity.
 	report(Trigger{
 		Sensor:   "rdp",
 		TokenID:  tokenID,

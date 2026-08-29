@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AlertChannel } from "../api.js";
@@ -35,6 +35,7 @@ interface FieldSpec {
   secret?: boolean;
   number?: boolean;
   placeholder?: string;
+  hint?: string;
 }
 
 const KIND_FIELDS: Record<string, FieldSpec[]> = {
@@ -63,7 +64,7 @@ const KIND_FIELDS: Record<string, FieldSpec[]> = {
     { key: "password", label: "Password (optional)", secret: true },
   ],
   loki: [
-    { key: "url", label: "Push URL", required: true, placeholder: "http://loki:3100/loki/api/v1/push" },
+    { key: "url", label: "Base URL", required: true, placeholder: "http://loki:3100", hint: "base URL only — /loki/api/v1/push is appended" },
     { key: "tenant_id", label: "Tenant ID (optional)" },
   ],
 };
@@ -106,6 +107,13 @@ function AddChannelDialog({
   const [busy, setBusy] = useState(false);
 
   const fields = KIND_FIELDS[kind] ?? [];
+
+  // Values are keyed by field name and several kinds share "url"; without
+  // this, switching kind (or reopening the dialog) carried the previous
+  // entry over into a channel it doesn't belong to.
+  useEffect(() => {
+    setValues({});
+  }, [kind, open]);
 
   async function create() {
     const config: Record<string, unknown> = {};
@@ -167,6 +175,7 @@ function AddChannelDialog({
                 value={values[f.key] ?? ""}
                 onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
               />
+              {f.hint && <p className="text-xs text-faint">{f.hint}</p>}
             </div>
           ))}
         </div>
@@ -187,7 +196,14 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
     setBusy("test");
     try {
       await api.testChannel(channel.id);
-      toast.success(`test alert delivered via ${channel.kind}`);
+      // syslog is UDP fire-and-forget: the sender resolves on a timer
+      // whether or not anything is listening, so promising delivery here
+      // would be a lie.
+      if (channel.kind === "syslog") {
+        toast.success("test datagram sent — UDP delivery is unverified");
+      } else {
+        toast.success(`test alert delivered via ${channel.kind}`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -254,7 +270,7 @@ function ChannelCard({ channel, onChanged }: { channel: AlertChannel; onChanged:
 }
 
 export function ChannelsPage() {
-  const { data: channels, error, reload } = usePoll<AlertChannel[]>(() => api.listChannels());
+  const { data: channels, error, loading, reload } = usePoll<AlertChannel[]>(() => api.listChannels());
   const [addOpen, setAddOpen] = useState(false);
   const list = channels ?? [];
 
@@ -274,7 +290,7 @@ export function ChannelsPage() {
         {list.length === 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>No channels yet</CardTitle>
+              <CardTitle>{loading && !channels ? "Loading channels…" : "No channels yet"}</CardTitle>
               <CardDescription>
                 Alerts only appear in the console until you add a delivery channel.
               </CardDescription>

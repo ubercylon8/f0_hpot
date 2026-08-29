@@ -27,7 +27,7 @@ func (SSHSensor) Start(ctx context.Context, cfg map[string]interface{}, report R
 			"event":     "command_execution",
 			"user":      session.User(),
 			"command":   cmd,
-			"source_ip": session.RemoteAddr().String(),
+			"source_ip": addrIP(session.RemoteAddr()),
 			"env":       session.Environ(),
 		}
 		log.Printf("[ssh] user=%q cmd=%q from %s", session.User(), cmd, detail["source_ip"])
@@ -53,7 +53,7 @@ func (SSHSensor) Start(ctx context.Context, cfg map[string]interface{}, report R
 				"event":          "credential_attempt",
 				"user":           ctx.User(),
 				"password":       password,
-				"source_ip":      ctx.RemoteAddr().String(),
+				"source_ip":      addrIP(ctx.RemoteAddr()),
 				"auth":           "password",
 				"client_version": ctx.ClientVersion(),
 			}

@@ -54,3 +54,19 @@ func remoteIP(conn net.Conn) string {
 	}
 	return host
 }
+
+// addrIP strips the port from a net.Addr. The ssh sensor used to record
+// RemoteAddr().String() verbatim, so its incidents carried "1.2.3.4:53422".
+// That broke the console's exact-match source_ip filter and gave every
+// connection its own alert-throttle bucket, letting a brute-force flood the
+// alert channels instead of collapsing into one alert.
+func addrIP(a net.Addr) string {
+	if a == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(a.String())
+	if err != nil {
+		return a.String()
+	}
+	return host
+}

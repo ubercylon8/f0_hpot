@@ -437,12 +437,10 @@ function SigningKeysCard() {
             <span className="min-w-0 flex-1 truncate font-mono text-muted">{k.publicKey}</span>
             <CopyButton value={k.publicKey} label="copy embeddable public key" />
             <span className="shrink-0 text-faint">{new Date(k.createdAt).toLocaleDateString()}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-danger hover:text-danger"
+            <ConfirmButton
+              label="delete"
               title="delete key (deployed agents keep their embedded public key)"
-              onClick={() =>
+              onConfirm={() =>
                 void api
                   .deleteReleaseKey(k.id)
                   .then(() => {
@@ -453,9 +451,7 @@ function SigningKeysCard() {
                     toast.error(err instanceof Error ? err.message : String(err)),
                   )
               }
-            >
-              delete
-            </Button>
+            />
           </div>
         ))}
         {(keys ?? []).length === 0 && (
@@ -624,12 +620,10 @@ function ReleasesCard() {
                   >
                     download
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-danger hover:text-danger"
+                  <ConfirmButton
+                    label="delete"
                     title={`delete ${f.filename}`}
-                    onClick={() =>
+                    onConfirm={() =>
                       void api
                         .deleteRelease(f.filename)
                         .then(() => {
@@ -640,9 +634,7 @@ function ReleasesCard() {
                           toast.error(err instanceof Error ? err.message : String(err)),
                         )
                     }
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  />
                 </span>
               </div>
             ))}
@@ -781,15 +773,11 @@ function CodeSigningCard() {
             >
               sign binaries
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-danger hover:text-danger"
-              disabled={busy}
-              onClick={() => void run(() => api.deleteCodeSignCert(c.id), `cert "${c.label}" deleted`)}
-            >
-              delete
-            </Button>
+            <ConfirmButton
+              label="delete"
+              busy={busy}
+              onConfirm={() => void run(() => api.deleteCodeSignCert(c.id), `cert "${c.label}" deleted`)}
+            />
           </div>
         ))}
         {(certs ?? []).length === 0 && (
@@ -967,9 +955,21 @@ function SensorEditor({
         >
           + add sensor
         </Button>
-        <Button size="sm" disabled={busy} onClick={() => void save()}>
-          {busy ? "deploying…" : "save & deploy"}
-        </Button>
+        {rows.length === 0 ? (
+          // Saving an empty set replaces the agent's whole sensor config,
+          // silently disabling every honeypot on that host. Make it a
+          // deliberate act rather than a stray click.
+          <ConfirmButton
+            label="remove all sensors"
+            confirmLabel="confirm — disables every sensor on this agent"
+            busy={busy}
+            onConfirm={() => void save()}
+          />
+        ) : (
+          <Button size="sm" disabled={busy} onClick={() => void save()}>
+            {busy ? "deploying…" : "save & deploy"}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -1235,7 +1235,7 @@ function AgentDrawer({
 }
 
 export function AgentsPage() {
-  const { data: agents, error, reload } = usePoll<AgentRow[]>(() => api.listAgents());
+  const { data: agents, error, loading, reload } = usePoll<AgentRow[]>(() => api.listAgents());
   const [addOpen, setAddOpen] = useState(false);
   // Track the id, not the row object: the drawer must re-render from the
   // polled list after a mutation, or it keeps showing pre-save sensors and
@@ -1336,7 +1336,9 @@ export function AgentsPage() {
         </Table>
         {list.length === 0 && (
           <p className="p-5 text-sm text-faint">
-            No agents enrolled — use Add agent to get an install one-liner.
+            {loading && !agents
+              ? "Loading agents…"
+              : "No agents enrolled — use Add agent to get an install one-liner."}
           </p>
         )}
       </Card>

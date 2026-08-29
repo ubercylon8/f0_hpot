@@ -82,7 +82,7 @@ export function IncidentsPage() {
   const MAX_LIMIT = 500;
   const [limit, setLimit] = useState(PAGE);
 
-  const { data: incidents, error, reload } = usePoll<Incident[]>(() =>
+  const { data: incidents, error, loading, reload } = usePoll<Incident[]>(() =>
     api.listIncidents({
       severity: severity === "all" ? undefined : severity,
       type: type === "all" ? undefined : type,
@@ -102,6 +102,25 @@ export function IncidentsPage() {
   useEffect(() => {
     setLimit(PAGE);
   }, [severity, type, acked, sourceIp, q]);
+
+  // Mirror the filters into the URL. They were read at mount but never
+  // written back, so copying the address bar after changing a dropdown
+  // reproduced the *old* filter set and a refresh silently reset the view.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    const sync = (key: string, value: string, empty: string) => {
+      if (value === empty) next.delete(key);
+      else next.set(key, value);
+    };
+    sync("severity", severity, "all");
+    sync("type", type, "all");
+    sync("acknowledged", acked, "all");
+    sync("source_ip", sourceIp, "");
+    sync("q", q, "");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [severity, type, acked, sourceIp, q, searchParams, setSearchParams]);
 
   const list = useMemo(() => incidents ?? [], [incidents]);
   const [expanded, setExpanded] = useState<string | null>(
@@ -227,8 +246,11 @@ export function IncidentsPage() {
         </label>
       )}
 
-      {list.length === 0 && (
+      {list.length === 0 && !loading && (
         <p className="text-sm text-faint">No incidents match the current filters.</p>
+      )}
+      {list.length === 0 && loading && (
+        <p className="text-sm text-faint">Loading incidents…</p>
       )}
       {list.length >= limit && (
         <div className="flex items-center gap-3 pt-1 text-xs text-faint">

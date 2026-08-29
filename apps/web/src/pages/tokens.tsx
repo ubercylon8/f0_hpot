@@ -689,7 +689,7 @@ function TokenDrawer({
 }
 
 export function TokensPage() {
-  const { data: tokens, error, reload } = usePoll<TokenRow[]>(() => api.listTokens());
+  const { data: tokens, error, loading, reload } = usePoll<TokenRow[]>(() => api.listTokens());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
@@ -873,7 +873,7 @@ export function TokensPage() {
         </Table>
         {filtered.length === 0 && (
           <p className="p-5 text-sm text-faint">
-            {(tokens ?? []).length === 0 ? "No tokens yet — create one." : "No tokens match the filter."}
+            {loading && !tokens ? "Loading tokens…" : (tokens ?? []).length === 0 ? "No tokens yet — create one." : "No tokens match the filter."}
           </p>
         )}
       </Card>
