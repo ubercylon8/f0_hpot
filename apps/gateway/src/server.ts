@@ -99,10 +99,18 @@ startSmtpServer({
 // say so loudly instead of silently dropping triggers. The API may not be
 // up yet, so only a definitive 401/403 warns; anything else is ignored.
 {
-  const res = await fetch(`${apiBaseUrl}/api/v1/status`, {
-    signal: AbortSignal.timeout(3000),
-    headers: apiInternalSecret ? { authorization: `Bearer ${apiInternalSecret}` } : {},
-  }).catch(() => null);
+  // Probe an INTERNAL route, not /status. The internal secret is
+  // deliberately not accepted on console routes, so probing /status warned
+  // on every correctly-configured start — training operators to ignore the
+  // one message that matters. A nonexistent token id answers 404 when the
+  // credentials are good and 401/403 when they are not.
+  const res = await fetch(
+    `${apiBaseUrl}/api/v1/tokens/000000000000/internal-config`,
+    {
+      signal: AbortSignal.timeout(3000),
+      headers: apiInternalSecret ? { authorization: `Bearer ${apiInternalSecret}` } : {},
+    },
+  ).catch(() => null);
   if (res && (res.status === 401 || res.status === 403)) {
     console.error(
       `WARNING: API answered ${res.status} for the gateway credentials. ` +
