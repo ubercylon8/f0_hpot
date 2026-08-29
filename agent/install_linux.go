@@ -36,7 +36,11 @@ Environment=HOME=%s
 # tokens from the very intruder they are meant to attract.
 NoNewPrivileges=yes
 ProtectSystem=full
-ReadWritePaths=%s
+# Two writable paths: the state dir, and the directory holding this binary.
+# The latter is what self-update needs — staging and replacing the
+# executable is impossible if its own directory is read-only, and the
+# update failed with "read-only file system" before this was added.
+ReadWritePaths=%s %s
 
 [Install]
 WantedBy=multi-user.target
@@ -51,7 +55,7 @@ func installService() error {
 	// The service runs as root, so its state lives under root's home. Pin it
 	// explicitly rather than relying on an environment systemd doesn't set.
 	home := filepath.Dir(stateDir)
-	unit := fmt.Sprintf(systemdUnit, exe, home, stateDir)
+	unit := fmt.Sprintf(systemdUnit, exe, home, stateDir, filepath.Dir(exe))
 	path := "/etc/systemd/system/f0-deception-agent.service"
 	if err := os.WriteFile(path, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("write unit (root required): %w", err)
