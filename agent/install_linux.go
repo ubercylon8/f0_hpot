@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 const systemdUnit = `[Unit]
@@ -16,6 +17,10 @@ Wants=network-online.target
 ExecStart=%s
 Restart=always
 RestartSec=10
+# systemd starts services with no HOME. The agent resolves its state dir
+# from the user's home, so without this the unit dies at startup with
+# "load state: $HOME is not defined" and restarts forever.
+Environment=HOME=%s
 # Hardening: agent needs network + its state dir only.
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -33,7 +38,10 @@ func installService() error {
 		return err
 	}
 	stateDir := stateDirPath()
-	unit := fmt.Sprintf(systemdUnit, exe, stateDir)
+	// The service runs as root, so its state lives under root's home. Pin it
+	// explicitly rather than relying on an environment systemd doesn't set.
+	home := filepath.Dir(stateDir)
+	unit := fmt.Sprintf(systemdUnit, exe, home, stateDir)
 	path := "/etc/systemd/system/f0-deception-agent.service"
 	if err := os.WriteFile(path, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("write unit (root required): %w", err)
