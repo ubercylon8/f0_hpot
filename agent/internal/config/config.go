@@ -20,11 +20,10 @@ type State struct {
 }
 
 func statePath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := stateDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, StateDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -39,6 +38,14 @@ func Load() (State, error) {
 	}
 	data, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
+		// One-time migration from the pre-service per-user location so an
+		// agent enrolled before the state moved keeps its identity.
+		if migrated, ok := loadLegacy(); ok {
+			if err := Save(migrated); err != nil {
+				return migrated, nil
+			}
+			return migrated, nil
+		}
 		return State{}, nil
 	}
 	if err != nil {
@@ -71,4 +78,21 @@ func Save(s State) error {
 // Enrolled reports whether the agent has an identity.
 func (s State) Enrolled() bool {
 	return s.AgentID != "" && s.AgentKey != ""
+}
+
+// loadLegacy reads state from the previous location, if any.
+func loadLegacy() (State, bool) {
+	dir, err := legacyStateDir()
+	if err != nil || dir == "" {
+		return State{}, false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		return State{}, false
+	}
+	var s State
+	if err := yaml.Unmarshal(data, &s); err != nil {
+		return State{}, false
+	}
+	return s, s.Enrolled()
 }

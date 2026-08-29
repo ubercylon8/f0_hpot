@@ -154,7 +154,7 @@ const AGENT_OS_OPTIONS = [
     label: "Windows · amd64",
     binary: "f0-deception-agent-windows-amd64.exe",
     kind: "powershell",
-    note: "runs in the foreground — Windows service install isn't implemented yet; register a scheduled task manually",
+    note: "installs as a Windows service — run the one-liner from an elevated PowerShell",
   },
 ] as const;
 
@@ -193,7 +193,7 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   const oneLiner = token
     ? osOption.kind === "powershell"
       ? `iwr -Uri ${origin}/api/v1/agent-releases/${osOption.binary} -Headers @{authorization='Bearer ${token}'} -OutFile ${osOption.binary}; ` +
-        `.\\${osOption.binary} --server ${origin} --enroll ${token}`
+        `.\\${osOption.binary} --server ${origin} --enroll ${token} --install`
       : `curl -fLO -H 'authorization: Bearer ${token}' ${origin}/api/v1/agent-releases/${osOption.binary} && ` +
         `chmod +x ${osOption.binary} && ` +
         `sudo ./${osOption.binary} --server ${origin} --enroll ${token} --install`
@@ -228,8 +228,9 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
             <Terminal className="h-4 w-4 text-accent" /> Add an agent
           </DialogTitle>
           <DialogDescription>
-            Run this on the honeypot host (linux/amd64). Other platforms: download
-            the matching binary from the releases card and use the same flags.
+            Pick the target platform, then run this on the honeypot host with
+            administrator or root privileges — it downloads the agent, enrolls it,
+            and installs it as a service.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">

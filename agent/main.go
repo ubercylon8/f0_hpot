@@ -3,10 +3,11 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
@@ -74,6 +75,23 @@ func main() {
 		log.Fatal("not enrolled; run with --server <url> --enroll <token>")
 	}
 
+	// Launched by the Windows SCM: run under the service control dispatcher
+	// so stop and shutdown requests are answered. Always false elsewhere.
+	if isWindowsService() {
+		if err := runAsService(state); err != nil {
+			log.Fatalf("service: %v", err)
+		}
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	runAgent(ctx, state)
+}
+
+// runAgent is the heartbeat/sensor loop. It returns when ctx is cancelled, so
+// the foreground process and the Windows service share one code path.
+func runAgent(ctx context.Context, state config.State) {
 	client := api.New(state.ServerURL, state.AgentID, state.AgentKey)
 
 	report := func(t sensors.Trigger) {
@@ -108,6 +126,10 @@ func main() {
 	var currentSpecs []api.SensorSpec
 	var pendingResults []api.DeploymentResult
 	for {
+		if ctx.Err() != nil {
+			log.Println("shutting down")
+			return
+		}
 		interval, specs, deployments, err := client.Heartbeat(pendingResults)
 		switch {
 		case err == nil:
@@ -144,7 +166,12 @@ func main() {
 				execSelf()
 			}
 		}
-		time.Sleep(poll)
+		select {
+		case <-ctx.Done():
+			log.Println("shutting down")
+			return
+		case <-time.After(poll):
+		}
 	}
 }
 
@@ -175,5 +202,3 @@ func specsEqual(a, b []api.SensorSpec) bool {
 	}
 	return true
 }
-
-var _ = fmt.Sprintf // keep fmt until install/uninstall subcommands land
