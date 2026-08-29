@@ -97,14 +97,7 @@ function AttentionCard({
   if (failing.length > 0) {
     items.push({ text: `${failing.length} alert channel(s) failing`, to: "/channels", tone: "warn" });
   }
-  const offline = agents.filter(
-    (a) =>
-      !(
-        a.status === "online" &&
-        a.lastSeenAt !== null &&
-        Date.now() - new Date(a.lastSeenAt).getTime() < 180_000
-      ),
-  );
+  const offline = agents.filter((a) => a.status !== "online");
   if (offline.length > 0) {
     items.push({ text: `${offline.length} agent(s) offline`, to: "/agents", tone: "warn" });
   }

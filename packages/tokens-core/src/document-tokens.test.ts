@@ -33,6 +33,39 @@ describe("document tokens", () => {
     expect(def.matchTrigger(ev, "tok123").matched).toBe(true);
   });
 
+  it("windows_folder ships a desktop.ini whose icon UNC uses the resolvable dot form", () => {
+    const def = getTokenType("windows_folder")!;
+    const artifacts = def.generate({
+      tokenId: "tok123",
+      baseDomain: "tokens.example.com",
+      gatewayOrigin: "https://tokens.example.com",
+      config: {},
+    });
+    const host = "tok123.tokens.example.com";
+
+    // The hostname handed to the operator must be the one the gateway owns:
+    // `<id>@<domain>` is not under `.<domain>` and never resolves.
+    const hostname = artifacts.find((a) => a.kind === "hostname");
+    expect(hostname?.value).toBe(host);
+    expect(artifacts.some((a) => a.value.includes("@"))).toBe(false);
+
+    const ini = artifacts.find((a) => a.file?.filename === "desktop.ini");
+    expect(ini).toBeDefined();
+    const body = Buffer.from(ini!.file!.bodyBase64, "base64").toString("utf8");
+    expect(body).toContain("[.ShellClassInfo]");
+    expect(body).toContain(`IconResource=\\\\${host}\\share\\folder.ico,0`);
+
+    // A DNS query for that exact name must fire the token.
+    const ev: TriggerEvent = {
+      kind: "dns",
+      tokenHint: "tok123",
+      timestamp: new Date().toISOString(),
+      sourceIp: "203.0.113.9",
+      dns: { queryName: host, queryType: "A" },
+    };
+    expect(def.matchTrigger(ev, "tok123")).toEqual({ matched: true, severity: "high" });
+  });
+
   it("sql_injection matches /sqli decoy hits", () => {
     const def = getTokenType("sql_injection")!;
     expect(

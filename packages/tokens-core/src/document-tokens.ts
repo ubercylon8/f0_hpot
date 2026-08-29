@@ -96,23 +96,81 @@ export const excelDocToken: TokenTypeDefinition = {
 };
 
 /**
- * Windows folder token: create a folder named `<tokenId>@<baseDomain>`.
- * Browsing it makes Windows resolve that name via DNS -> alert.
+ * Windows folder token: a `desktop.ini` that points Explorer's folder icon at
+ * a UNC path on the token host. Browsing the folder makes Explorer resolve
+ * that hostname (and attempt SMB), which fires the DNS trigger.
+ *
+ * The previous implementation handed out a folder *named*
+ * `<tokenId>@<baseDomain>`; naming a folder that does nothing on Windows, and
+ * the `@` form is not a resolvable hostname (the gateway owns names under
+ * `.<baseDomain>`), so the artifact could never trigger.
  */
 export const windowsFolderToken: TokenTypeDefinition = {
   id: "windows_folder",
   label: "Windows Folder",
   description:
-    "Create a folder with this special name; Windows resolves it over DNS when browsed, triggering an alert.",
+    "Drop the generated desktop.ini into a folder; browsing it makes Windows Explorer resolve the token hostname, triggering an alert.",
   group: "network",
   configSchema: emptyConfig,
+  hostnameFor(ctx) {
+    return `${ctx.tokenId}.${ctx.baseDomain}`;
+  },
   generate(ctx) {
-    const name = `${ctx.tokenId}@${ctx.baseDomain}`;
+    const host = `${ctx.tokenId}.${ctx.baseDomain}`;
+    const uncIcon = `\\\\${host}\\share\\folder.ico`;
+    // CRLF + the [.ShellClassInfo] section is what Explorer expects.
+    const desktopIni = [
+      "[.ShellClassInfo]",
+      `IconResource=${uncIcon},0`,
+      `IconFile=${uncIcon}`,
+      "IconIndex=0",
+      "",
+    ].join("\r\n");
+    const readme = [
+      "f0_hpot — Windows folder token",
+      "",
+      `Trigger hostname: ${host}`,
+      "",
+      "Deploy:",
+      "  1. Create (or pick) a folder somewhere an intruder would browse,",
+      "     e.g. C:\\Finance\\Payroll Exports.",
+      "  2. Copy desktop.ini into it.",
+      "  3. Mark the folder as system so Explorer reads desktop.ini:",
+      "       attrib +s \"C:\\path\\to\\folder\"",
+      "       attrib +h \"C:\\path\\to\\folder\\desktop.ini\"",
+      "",
+      "Browsing the folder makes Explorer resolve the icon's UNC path, which",
+      "sends a DNS query for the hostname above and raises an incident.",
+      "",
+      "Note: Explorer caches folder icons. Test from a machine that has not",
+      "opened the folder before, or clear the icon cache between tests.",
+      "",
+    ].join("\r\n");
     return [
       {
         kind: "hostname",
-        label: "Folder name to create",
-        value: name,
+        label: "Trigger hostname (resolved by Explorer)",
+        value: host,
+      },
+      {
+        kind: "file_download",
+        label: "desktop.ini",
+        value: `/api/v1/tokens/${ctx.tokenId}/files/0`,
+        file: {
+          filename: "desktop.ini",
+          contentType: "text/plain",
+          bodyBase64: Buffer.from(desktopIni, "utf8").toString("base64"),
+        },
+      },
+      {
+        kind: "file_download",
+        label: "windows_folder_readme.txt",
+        value: `/api/v1/tokens/${ctx.tokenId}/files/1`,
+        file: {
+          filename: "windows_folder_readme.txt",
+          contentType: "text/plain",
+          bodyBase64: Buffer.from(readme, "utf8").toString("base64"),
+        },
       },
     ];
   },

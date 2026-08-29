@@ -133,10 +133,9 @@ async function deleteMany(
 }
 
 function OnlineDot({ agent }: { agent: AgentRow }) {
-  const online =
-    agent.status === "online" &&
-    agent.lastSeenAt !== null &&
-    Date.now() - new Date(agent.lastSeenAt).getTime() < 180_000;
+  // The API derives `status` from lastSeenAt on every read (agent-status.ts),
+  // so trust it rather than re-deriving liveness against a second threshold.
+  const online = agent.status === "online";
   return (
     <span className={cn("flex items-center gap-1.5 text-xs", online ? "text-accent" : "text-danger")}>
       <span className={cn("inline-block h-1.5 w-1.5 rounded-full", online ? "bg-accent" : "bg-danger")} />

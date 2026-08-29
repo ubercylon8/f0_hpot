@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { DashboardStats } from "@f0/deception-shared";
 import type { Db } from "../db/index.js";
 import { agentDeployments, agents, incidents, tokens } from "../db/schema.js";
+import { isOnline } from "../agent-status.js";
 
 const DAY_MS = 86_400_000;
 
@@ -33,17 +34,12 @@ export function registerStatsRoutes(app: FastifyInstance, db: Db): void {
     const tokenCount = (status: string) =>
       tokenRows.find((r) => r.status === status)?.count ?? 0;
 
-    // Fleet health: an agent is "online" if it beat within 2x the poll
-    // interval it was told to use (default 60s).
-    const pollSec = Number(process.env.F0_AGENT_POLL_INTERVAL ?? 60);
+    // Fleet health: one shared definition of liveness (see agent-status.ts).
     const agentRows = db
       .select({ lastSeenAt: agents.lastSeenAt })
       .from(agents)
       .all();
-    const onlineCutoff = cutoff(2 * pollSec * 1000);
-    const online = agentRows.filter(
-      (a) => a.lastSeenAt !== null && a.lastSeenAt >= onlineCutoff,
-    ).length;
+    const online = agentRows.filter((a) => isOnline(a.lastSeenAt, now)).length;
 
     // 30-day incident timeline, zero-filled, oldest first.
     const dayRows = db

@@ -8,6 +8,7 @@ import { agentDeployments, agents, agentSensors, tokens, tokenFiles } from "../d
 import { newId } from "../ids.js";
 import { hashAgentKey, verifyAgentKey } from "../auth.js";
 import { consumeEnrollmentToken } from "../enrollment.js";
+import { agentStatus, pollIntervalSeconds } from "../agent-status.js";
 import { generateContextFor } from "./tokens.js";
 
 const SENSOR_CONFIG_SCHEMA = z.array(
@@ -189,6 +190,8 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
       .all();
     return rows.map((a) => ({
       ...a,
+      // Derived, not the stored column: see agent-status.ts.
+      status: agentStatus(a.lastSeenAt),
       sensors: db
         .select()
         .from(agentSensors)
