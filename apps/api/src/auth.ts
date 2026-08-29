@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
-import { agents, apiKeys } from "./db/schema.js";
+import { agents, apiKeys, enrollmentTokens } from "./db/schema.js";
 
 /**
  * Console authentication.
@@ -37,6 +37,13 @@ const INTERNAL_ROUTES: { method: string; path: RegExp }[] = [
   { method: "GET", path: /^\/api\/v1\/tokens\/[^/]+\/internal-(config|page|image)$/ },
 ];
 
+const RELEASE_DOWNLOAD_ROUTES: { method: string; path: RegExp }[] = [
+  // Agent binary download only — list/build/sign/delete stay console scope.
+  // The install one-liner fetches the binary before the host has any console
+  // credential, so a valid enrollment token also authorizes this route.
+  { method: "GET", path: /^\/api\/v1\/agent-releases\/[^/]+$/ },
+];
+
 export function hashApiKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
 }
@@ -67,6 +74,23 @@ function isValidAgentCredential(
     .where(eq(agents.id, agentId))
     .get();
   return !!agent && verifyAgentKey(key, agent.agentKeyHash);
+}
+
+/**
+ * Non-consuming enrollment-credential check (bootstrap env token or a live
+ * managed f0et_ token). Downloading a binary isn't enrolling, so `uses`
+ * stays untouched — consumeEnrollmentToken records those at /agent/enroll.
+ */
+function isValidEnrollmentCredential(db: Db, presented: string): boolean {
+  const bootstrap = process.env.F0_ENROLLMENT_TOKEN;
+  if (bootstrap && timingSafeMatch(presented, bootstrap)) return true;
+  const row = db
+    .select({ expiresAt: enrollmentTokens.expiresAt })
+    .from(enrollmentTokens)
+    .where(eq(enrollmentTokens.tokenHash, hashAgentKey(presented)))
+    .get();
+  if (!row) return false;
+  return !(row.expiresAt && row.expiresAt < new Date().toISOString());
 }
 
 function presentedKey(request: FastifyRequest): string | undefined {
@@ -147,6 +171,14 @@ export function makeAuthHook(db: Db, ctx: AuthContext) {
       }
       if (openMode) return;
       return reply.unauthorized("invalid internal credentials");
+    }
+
+    if (RELEASE_DOWNLOAD_ROUTES.some((r) => r.method === method && r.path.test(url))) {
+      if (openMode) return;
+      if (key && ctx.adminToken && timingSafeMatch(key, ctx.adminToken)) return;
+      if (key && isValidConsoleKey(db, key)) return;
+      if (key && isValidEnrollmentCredential(db, key)) return;
+      return reply.unauthorized("authentication required");
     }
 
     // Everything else under /api/v1 is console scope.

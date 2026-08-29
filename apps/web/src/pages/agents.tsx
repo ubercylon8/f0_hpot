@@ -193,9 +193,9 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   const osOption = AGENT_OS_OPTIONS.find((o) => o.id === osId) ?? AGENT_OS_OPTIONS[0];
   const oneLiner = token
     ? osOption.kind === "powershell"
-      ? `iwr -Uri ${origin}/api/v1/agent-releases/${osOption.binary} -OutFile ${osOption.binary}; ` +
+      ? `iwr -Uri ${origin}/api/v1/agent-releases/${osOption.binary} -Headers @{authorization='Bearer ${token}'} -OutFile ${osOption.binary}; ` +
         `.\\${osOption.binary} --server ${origin} --enroll ${token}`
-      : `curl -LO ${origin}/api/v1/agent-releases/${osOption.binary} && ` +
+      : `curl -fLO -H 'authorization: Bearer ${token}' ${origin}/api/v1/agent-releases/${osOption.binary} && ` +
         `chmod +x ${osOption.binary} && ` +
         `sudo ./${osOption.binary} --server ${origin} --enroll ${token} --install`
     : null;

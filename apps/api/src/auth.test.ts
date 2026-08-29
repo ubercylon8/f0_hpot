@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { buildServer } from "./server.js";
 
-const ENV_VARS = ["F0_ADMIN_TOKEN", "F0_INTERNAL_SECRET"] as const;
+const ENV_VARS = ["F0_ADMIN_TOKEN", "F0_INTERNAL_SECRET", "F0_ENROLLMENT_TOKEN"] as const;
 
 function savedEnv() {
   const saved: Record<string, string | undefined> = {};
@@ -212,6 +212,70 @@ describe("API auth", () => {
       expect(inc.statusCode).toBe(404); // unknown token, but auth passed
     } finally {
       delete process.env.F0_ENROLLMENT_TOKEN;
+      await app.close();
+    }
+  });
+
+  it("release download accepts enrollment credentials; release management does not", async () => {
+    process.env.F0_ADMIN_TOKEN = "admin-secret";
+    process.env.F0_ENROLLMENT_TOKEN = "bootstrap-enroll";
+    delete process.env.F0_INTERNAL_SECRET;
+    const { app } = buildServer({ dbPath: ":memory:" });
+    await app.ready();
+    try {
+      const dl = (auth?: string) =>
+        app.inject({
+          method: "GET",
+          url: "/api/v1/agent-releases/f0-deception-agent-linux-amd64",
+          headers: auth ? { authorization: `Bearer ${auth}` } : {},
+        });
+
+      // No credential → 401; junk credential → 401.
+      expect((await dl()).statusCode).toBe(401);
+      expect((await dl("nonsense")).statusCode).toBe(401);
+
+      // Bootstrap enrollment token passes auth (404 = no binary on disk,
+      // which means the auth hook let the request through).
+      expect((await dl("bootstrap-enroll")).statusCode).toBe(404);
+
+      // A managed f0et_ token passes too, without recording a use.
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/v1/enrollment-tokens",
+        headers: { authorization: "Bearer admin-secret" },
+        payload: { label: "dl-test" },
+      });
+      expect(created.statusCode).toBe(201);
+      const { token } = created.json() as { token: string };
+      expect((await dl(token)).statusCode).toBe(404);
+      const listed = await app.inject({
+        method: "GET",
+        url: "/api/v1/enrollment-tokens",
+        headers: { authorization: "Bearer admin-secret" },
+      });
+      const row = (listed.json() as { label: string; uses: number }[]).find(
+        (t) => t.label === "dl-test",
+      );
+      expect(row?.uses).toBe(0);
+
+      // Console credentials still work on the download route.
+      expect((await dl("admin-secret")).statusCode).toBe(404);
+
+      // Enrollment credentials do NOT reach release management or listing.
+      const build = await app.inject({
+        method: "POST",
+        url: "/api/v1/agent-releases/build",
+        headers: { authorization: "Bearer bootstrap-enroll" },
+        payload: { version: "v0.0.0" },
+      });
+      expect(build.statusCode).toBe(401);
+      const list = await app.inject({
+        method: "GET",
+        url: "/api/v1/agent-releases",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(list.statusCode).toBe(401);
+    } finally {
       await app.close();
     }
   });
