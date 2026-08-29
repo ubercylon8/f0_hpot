@@ -274,6 +274,9 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 	}
 
 	uid := uint16(0x1000)
+	// Held across round trips so the AUTHENTICATE can be scored against
+	// the challenge we actually issued (extended-security path).
+	var serverChallenge [8]byte
 	for i := 0; i < 4; i++ {
 		buf, err := t.readMsg()
 		if err != nil || len(buf) < 35 {
@@ -292,10 +295,11 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 		}
 		switch {
 		case IsNegotiate(blob):
-			chalMsg, _, err := BuildChallenge("FORTIKA")
+			chalMsg, chal, err := BuildChallenge("FORTIKA")
 			if err != nil {
 				return
 			}
+			serverChallenge = chal
 			// Wrap challenge in SPNEGO negTokenResp (accept-completed):
 			// a1 { 30 { a0 negState, a2 responseToken } }
 			respTok := append([]byte{0x04, byte(len(chalMsg))}, chalMsg...)
@@ -314,6 +318,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 				log.Printf("[smb1] auth parse failed from %s: %v", remoteIP(t.conn), err)
 				return
 			}
+			auth.Challenge = serverChallenge
 			line := HashcatLine(auth)
 			log.Printf("[smb1] captured credentials user=%q domain=%q host=%q from %s",
 				auth.Username, auth.Domain, auth.Host, remoteIP(t.conn))

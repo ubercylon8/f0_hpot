@@ -27,6 +27,9 @@ func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
 	tlsConn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	tlsConn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 
+	// Held across CredSSP round trips: the AUTHENTICATE must be scored
+	// against the challenge we issued, or the hashcat line is worthless.
+	var serverChallenge [8]byte
 	for round := 0; round < 3; round++ {
 		req, err := readAllAvailable(tlsConn)
 		if err != nil || len(req) == 0 {
@@ -39,10 +42,11 @@ func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
 		blob := req[idx:]
 		switch {
 		case IsNegotiate(blob):
-			chalMsg, _, err := BuildChallenge("FORTIKA-RDP")
+			chalMsg, chal, err := BuildChallenge("FORTIKA-RDP")
 			if err != nil {
 				return
 			}
+			serverChallenge = chal
 			if err := writeTSRequestChallenge(tlsConn, chalMsg); err != nil {
 				return
 			}
@@ -53,6 +57,7 @@ func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
 				log.Printf("[rdp] credssp parse failed from %s: %v", remoteIP(tlsConn), err)
 				return
 			}
+			auth.Challenge = serverChallenge
 			line := HashcatLine(auth)
 			log.Printf("[rdp] captured credentials user=%q domain=%q from %s",
 				auth.Username, auth.Domain, remoteIP(tlsConn))

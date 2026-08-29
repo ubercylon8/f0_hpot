@@ -91,6 +91,10 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 // running one NTLM challenge round and capturing whatever credentials
 // the client volunteers.
 func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
+	// The server challenge is issued with the CHALLENGE message and needed
+	// again when the AUTHENTICATE arrives a round trip later. Without it the
+	// hashcat line carries a zeroed challenge and cannot be cracked.
+	var serverChallenge [8]byte
 	for i := 0; i < 4; i++ { // bounded: at most a few round trips
 		buf, err := t.readMsg()
 		if err != nil || len(buf) < 64 {
@@ -113,10 +117,11 @@ func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
 
 		switch {
 		case IsNegotiate(secBlob):
-			challengeMsg, _, err := BuildChallenge("FORTIKA")
+			challengeMsg, chal, err := BuildChallenge("FORTIKA")
 			if err != nil {
 				return
 			}
+			serverChallenge = chal
 			reply := buildSMB2StatusReply(0xC0000016, sessionID|1, challengeMsg) // MORE_PROCESSING_REQUIRED
 			if err := t.writeMsg(reply); err != nil {
 				return
@@ -129,6 +134,7 @@ func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
 				log.Printf("[smb] auth parse failed from %s: %v", remoteIP(t.conn), err)
 				return
 			}
+			auth.Challenge = serverChallenge
 			line := HashcatLine(auth)
 			log.Printf("[smb] captured credentials user=%q domain=%q host=%q from %s",
 				auth.Username, auth.Domain, auth.Host, remoteIP(t.conn))
