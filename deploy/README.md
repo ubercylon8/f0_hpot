@@ -52,6 +52,16 @@ A    <console-domain>      → <your-ip>        # only for public console
 
 Verification runs `dig` against 8.8.8.8 per record with retry/skip/abort.
 
+## Signing prerequisites
+
+The API image ships `openssl` and `osslsigncode`, so release-manifest signing
+and Authenticode code signing work on a fresh install — nothing to install by
+hand. `GET /api/v1/status` reports which host-dependent actions are available
+(`capabilities`), and the console disables the ones that are not, with the
+reason. `build binaries` stays unavailable in the container image by design:
+it needs the Go toolchain and the agent source, which the runtime image does
+not carry — build releases on a host checkout instead.
+
 ## Topology
 
 | Surface | Exposure | Ports |
