@@ -462,7 +462,7 @@ async function phasePreflight() {
           `${C.bold}    apt-get update && apt-get install -y ${pkgs.join(" ")}${C.reset}\n`,
       );
       if (await confirm("install them now?", true)) {
-        if (!aptInstall(pkgs, `installing ${pkgs.length} package(s) via apt`)) {
+        if (!(await aptInstall(pkgs, `installing ${pkgs.length} package(s) via apt`))) {
           throw new Error("dependency install failed");
         }
         // Re-verify after install.
@@ -538,7 +538,7 @@ async function phasePreflight() {
     if (detectPkgManager() === "apt") {
       const pkgs = missingBuild.map((d) => d.pkg);
       if (await confirm(`also install binary-build dependencies (${pkgs.join(" ")})?`, false)) {
-        aptInstall(pkgs, `installing ${pkgs.join(" ")}`);
+        await aptInstall(pkgs, `installing ${pkgs.join(" ")}`);
       } else {
         info("skipping build deps — agent binaries won't be compiled on this host.");
       }
