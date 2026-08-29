@@ -275,6 +275,20 @@ function sudoPrefix() {
   throw new Error("not root and sudo not found — install dependencies as root");
 }
 
+/**
+ * Set during preflight when the invoking user can't reach the docker socket
+ * directly (not root, not in the docker group) but sudo can. Group membership
+ * granted mid-run doesn't apply until re-login, so this run goes through sudo.
+ */
+let dockerSudo = false;
+
+function dockerInfoOk(viaSudo) {
+  const args = ["docker", "info", "--format", "{{.ServerVersion}}"];
+  return viaSudo
+    ? !!run("sudo", args, { ignoreError: true })
+    : !!run(args[0], args.slice(1), { ignoreError: true });
+}
+
 /** Spawn with a live spinner + rolling last-output-line (full log to file). */
 function runTask(label, cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -461,6 +475,64 @@ async function phasePreflight() {
     }
   }
   if (missing.length > 0) throw new Error("preflight failed: required dependencies missing");
+
+  // Daemon *access*, not just binary presence: a non-root user outside the
+  // docker group passes the checks above and only fails much later, at
+  // compose up, with a socket permission error. Catch it here instead.
+  if (dockerInfoOk(false)) {
+    process.stdout.write(`${ok("docker daemon access")}\n`);
+  } else {
+    process.stdout.write(`${bad("docker daemon access")}\n`);
+    const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+    const canSudo = !isRoot && which("sudo");
+    const probeSudo = () => {
+      info("checking whether sudo reaches the daemon (may prompt for your password)…");
+      return dockerInfoOk(true);
+    };
+    let sudoReaches = canSudo && probeSudo();
+
+    if (!sudoReaches) {
+      // Neither we nor root reach the socket: the daemon itself isn't running —
+      // typical right after `apt-get install docker.io` on a minimal image.
+      const sudo = sudoPrefix();
+      process.stdout.write(`${C.amber}  the docker daemon isn't responding — the service may not be running.${C.reset}\n`);
+      if (await confirm(`run ${sudo}systemctl enable --now docker?`, true)) {
+        await runTask("starting docker daemon", "bash", ["-c", `${sudo}systemctl enable --now docker`]);
+      }
+      // Re-probe: direct first; a non-root user may now hit the permission wall.
+      if (!dockerInfoOk(false)) sudoReaches = canSudo && dockerInfoOk(true);
+      if (!dockerInfoOk(false) && !sudoReaches) {
+        throw new Error(`preflight failed: docker daemon unreachable — see ${sudo}journalctl -u docker`);
+      }
+    }
+
+    if (dockerInfoOk(false)) {
+      process.stdout.write(`${ok("docker daemon access")}\n`);
+    } else {
+      // The daemon is fine — this user just isn't allowed at the socket.
+      const user = run("id", ["-un"], { ignoreError: true }) || process.env.USER || "";
+      process.stdout.write(
+        `${C.amber}  the docker daemon is running, but your user can't reach its socket.${C.reset}\n` +
+          `${C.amber}  group membership takes effect at next login, so this run uses sudo either way.${C.reset}\n`,
+      );
+      const fix = await select("docker socket access", [
+        {
+          label: `add ${user} to the docker group (recommended)`,
+          value: "usermod",
+          hint: `sudo usermod -aG docker ${user}; future logins won't need sudo`,
+        },
+        { label: "use sudo for docker in this run only", value: "sudo-only", hint: "changes nothing on the host" },
+        { label: "abort", value: "abort", hint: "fix access yourself, then re-run" },
+      ]);
+      if (fix === "abort") throw new Error("preflight failed: no docker daemon access");
+      if (fix === "usermod") {
+        await runTask(`adding ${user} to the docker group`, "sudo", ["usermod", "-aG", "docker", user]);
+        info("group change applies at your next login; continuing this run via sudo.");
+      }
+      dockerSudo = true;
+      process.stdout.write(`${ok("docker daemon access (via sudo this run)")}\n`);
+    }
+  }
 
   if (missingBuild.length > 0) {
     if (detectPkgManager() === "apt") {
@@ -732,9 +804,12 @@ async function phaseBuild() {
 }
 
 function compose(args, label) {
-  return runTask(label, "docker", [
+  const composeArgs = [
     "compose", "-f", path.join(DEPLOY_DIR, "docker-compose.yml"), "--env-file", ENV_PATH, ...args,
-  ]);
+  ];
+  return dockerSudo
+    ? runTask(label, "sudo", ["docker", ...composeArgs])
+    : runTask(label, "docker", composeArgs);
 }
 
 async function phaseDeploy() {
@@ -810,8 +885,8 @@ function phaseFinish() {
       `  --enroll ${answers.secrets.F0_ENROLLMENT_TOKEN} --install`,
       "",
       `${C.bold}token surface${C.reset}   ${agentUrl} (${answers.tlsMode}) — plant tokens from the console`,
-      `${C.bold}backups${C.reset}        docker run --rm -v f0-deception_api-data:/data -v $(pwd):/backup alpine tar czf /backup/api-data.tar.gz -C /data .`,
-      `${C.bold}logs${C.reset}           docker compose -f deploy/docker-compose.yml logs -f · install log: ${LOG_PATH}`,
+      `${C.bold}backups${C.reset}        ${dockerSudo ? "sudo " : ""}docker run --rm -v f0-deception_api-data:/data -v $(pwd):/backup alpine tar czf /backup/api-data.tar.gz -C /data .`,
+      `${C.bold}logs${C.reset}           ${dockerSudo ? "sudo " : ""}docker compose -f deploy/docker-compose.yml logs -f · install log: ${LOG_PATH}`,
     ],
     C.green,
   );

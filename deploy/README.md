@@ -16,6 +16,12 @@ URL and admin token.
 Flags: `--reconfigure` (re-ask everything, secrets preserved),
 `--dry-run` (write `.env` + `Caddyfile`, stop before compose up).
 
+Runs as root or as a regular user with sudo. Preflight verifies docker
+*daemon access* (not just the binary): if your user can't reach the
+socket it offers to add you to the docker group (effective next login)
+and finishes the current run through sudo; if the daemon isn't running
+it offers `systemctl enable --now docker`.
+
 ## What the installer asks
 
 | Question | Used for |
