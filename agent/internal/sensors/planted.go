@@ -41,7 +41,9 @@ func (PlantedCredentialSensor) Start(ctx context.Context, cfg map[string]interfa
 		// update atime on the very next read: relatime refreshes atime
 		// only when it is older than mtime.
 		old := time.Now().Add(-48 * time.Hour)
-		_ = os.Chtimes(path, old, old)
+		if err := os.Chtimes(path, old, old); err != nil {
+			log.Printf("[planted_credential] WARNING: cannot backdate %s (%v)", path, err)
+		}
 		log.Printf("[planted_credential] planted bait at %s", path)
 	}
 
@@ -167,5 +169,10 @@ func armAtime(path string) {
 		return
 	}
 	mtime := st.ModTime()
-	_ = os.Chtimes(path, mtime.Add(-1*time.Hour), mtime)
+	if err := os.Chtimes(path, mtime.Add(-1*time.Hour), mtime); err != nil {
+		// Worth shouting about: an unarmed trap looks identical to a quiet
+		// one. A read-only mount (or over-tight service hardening) silently
+		// turns this sensor into decoration.
+		log.Printf("[planted_credential] WARNING: cannot arm %s (%v) — reads of this bait will NOT be detected", path, err)
+	}
 }
