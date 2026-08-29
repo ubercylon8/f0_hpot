@@ -289,7 +289,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
-  getIncident: (id: string) => request<Incident>(`/incidents/${id}`),
   ackIncident: (id: string) =>
     request(`/incidents/${id}/ack`, { method: "PATCH" }),
   setIncidentNotes: (id: string, notes: string | null) =>

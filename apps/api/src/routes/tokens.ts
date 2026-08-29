@@ -209,10 +209,17 @@ export function registerTokenRoutes(
         .run();
       return reply.send({ ok: true, updated: result.changes });
     }
+    // Count rows that actually existed: reporting ids.length let the
+    // console claim it deleted tokens that were already gone.
+    const present = db
+      .select({ id: tokens.id })
+      .from(tokens)
+      .where(inArray(tokens.id, ids))
+      .all().length;
     db.transaction((tx) => {
       for (const id of ids) hardDeleteToken(tx as unknown as Db, id);
     });
-    return reply.send({ ok: true, updated: ids.length });
+    return reply.send({ ok: true, updated: present });
   });
 
   app.delete("/api/v1/tokens/:id", async (request, reply) => {

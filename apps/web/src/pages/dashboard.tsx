@@ -372,9 +372,11 @@ function computeFrame(points: DashboardStats["geoPoints"]): MapFrame {
 function GeoMapPanel({
   points,
   countries,
+  geoipEnabled,
 }: {
   points: DashboardStats["geoPoints"];
   countries: DashboardStats["byCountry"];
+  geoipEnabled: boolean;
 }) {
   const max = Math.max(1, ...points.map((p) => p.count));
   const hitCountries = new Set(points.map((p) => p.country).filter(Boolean));
@@ -384,7 +386,9 @@ function GeoMapPanel({
       <CardHeader>
         <CardTitle>Incident origins</CardTitle>
         <CardDescription>
-          source-IP geolocation — set F0_GEOIP_DB on the API to enable
+          {geoipEnabled
+            ? "source-IP geolocation"
+            : "source-IP geolocation — set F0_GEOIP_DB on the API to enable"}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -591,7 +595,7 @@ export function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <GeoMapPanel points={stats.geoPoints} countries={stats.byCountry} />
+              <GeoMapPanel points={stats.geoPoints} countries={stats.byCountry} geoipEnabled={data.status.geoipEnabled} />
             </div>
             <BarList
               title="Top source IPs"

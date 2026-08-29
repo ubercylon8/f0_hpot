@@ -112,3 +112,44 @@ describe("registry", () => {
     expect(matchEventToType(ev, "tok123")?.id).toBe("qr_code");
   });
 });
+
+describe("P3 matcher and config corrections", () => {
+  it("sensitive_cmd matches the bare /cmd path it already serves", () => {
+    const def = getTokenType("sensitive_cmd")!;
+    const ev = (path: string): TriggerEvent => ({
+      kind: "http",
+      tokenHint: "tok123",
+      timestamp: new Date().toISOString(),
+      sourceIp: "203.0.113.5",
+      http: { method: "GET", path, host: "tokens.example.com", headers: {} },
+    });
+    // The gateway serves this (default command output), so it must alert.
+    expect(def.matchTrigger(ev("/tok123/cmd"), "tok123").matched).toBe(true);
+    expect(def.matchTrigger(ev("/tok123/cmd/whoami"), "tok123").matched).toBe(true);
+    expect(def.matchTrigger(ev("/tok123/cmdother"), "tok123").matched).toBe(false);
+  });
+
+  it("email token honours a configured mail_domain", () => {
+    const def = getTokenType("email")!;
+    const cfg = def.configSchema.parse({ mail_domain: "mail.example.net" }) as Record<string, unknown>;
+    // Previously the empty schema stripped this and the address was always
+    // <id>@<baseDomain>.
+    expect(cfg["mail_domain"]).toBe("mail.example.net");
+    const [artifact] = def.generate({
+      tokenId: "tok123",
+      baseDomain: "tokens.example.com",
+      gatewayOrigin: "https://tokens.example.com",
+      config: cfg,
+    });
+    expect(artifact?.value).toBe("tok123@mail.example.net");
+  });
+
+  it("cloned_website no longer advertises the dead strip_assets option", () => {
+    const def = getTokenType("cloned_website")!;
+    const cfg = def.configSchema.parse({
+      target_url: "https://example.com/",
+      strip_assets: true,
+    }) as Record<string, unknown>;
+    expect(cfg["strip_assets"]).toBeUndefined();
+  });
+});

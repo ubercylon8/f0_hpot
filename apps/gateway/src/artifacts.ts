@@ -170,7 +170,9 @@ export function artifactResponder(opts: ArtifactResponderOptions) {
     }
 
     if (action === "qr") {
-      const png = await QRCode.toBuffer(path, {
+      // Encode the full token URL, not the bare request path: a QR holding
+      // "/tok/qr" is not scannable into anything that reaches the gateway.
+      const png = await QRCode.toBuffer(`${opts.gatewayOrigin}${path}`, {
         width: 512,
         margin: 1,
         errorCorrectionLevel: "L",

@@ -207,7 +207,18 @@ function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
     }
     setBusy(true);
     try {
-      const hours = expires.trim() ? Number(expires.trim()) : undefined;
+      // Number("abc") is NaN, which is falsy — the field used to be dropped
+      // silently and a NON-EXPIRING token was created instead.
+      let hours: number | undefined;
+      if (expires.trim()) {
+        const n = Number(expires.trim());
+        if (!Number.isInteger(n) || n < 1 || n > 8760) {
+          toast.error("expiry must be a whole number of hours between 1 and 8760");
+          setBusy(false);
+          return;
+        }
+        hours = n;
+      }
       const created = await api.createEnrollmentToken(label.trim(), hours);
       setFresh(created);
       setLabel("");
@@ -1011,6 +1022,18 @@ function DeployTokenSection({ agentId }: { agentId: string }) {
   const [busy, setBusy] = useState(false);
 
   const reload = () => api.listAgentDeployments(agentId).then(setDeployments).catch(() => {});
+
+  // Deployments complete on the agent's next heartbeat, but the list only
+  // refreshed on a manual click — so rows sat at "pending" indefinitely
+  // even after the work was done. Poll while any row is still pending.
+  const hasPending = deployments.some((d) => d.status === "pending");
+  useEffect(() => {
+    if (!hasPending) return;
+    const t = setInterval(() => void reload(), 10_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPending, agentId]);
+
   useEffect(() => {
     api
       .listTokens()

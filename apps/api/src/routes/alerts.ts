@@ -5,6 +5,7 @@ import type { Db } from "../db/index.js";
 import { alertChannels } from "../db/schema.js";
 import { newId } from "../ids.js";
 import type { AlertDispatcher } from "../alerts/dispatcher.js";
+import { alertChannelKindSchema } from "@f0/deception-shared";
 
 const channelConfigSchemas: Record<string, z.ZodType> = {
   webhook: z.object({
@@ -67,7 +68,7 @@ export function registerAlertRoutes(
   app.post("/api/v1/alert-channels", async (request, reply) => {
     const parsed = z
       .object({
-        kind: z.enum(["webhook", "email", "syslog", "elasticsearch", "loki"]),
+        kind: alertChannelKindSchema,
         config: z.record(z.string(), z.unknown()),
       })
       .safeParse(request.body);

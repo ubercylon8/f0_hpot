@@ -19,9 +19,11 @@ export const clonedWebsiteToken: TokenTypeDefinition = {
   description:
     "A copy of a page you choose, served from our infrastructure with an invisible beacon. Anyone browsing the clone triggers an alert.",
   group: "document",
+  // strip_assets used to be offered here but nothing ever read it — the
+  // cloner injects a beacon and leaves the markup alone. Dropped rather
+  // than presented as a working option.
   configSchema: z.object({
     target_url: z.string().url(),
-    strip_assets: z.boolean().default(true),
   }),
   generate(ctx) {
     return [

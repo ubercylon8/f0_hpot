@@ -156,7 +156,10 @@ export const emailToken: TokenTypeDefinition = {
   description:
     "A unique email address. Any mail sent to it triggers an alert (requires MX records pointing at the gateway).",
   group: "network",
-  configSchema: emptyConfig,
+  // mail_domain was read by generate() but the empty schema stripped it, so
+  // the address was always <id>@<baseDomain>. Declare it so the option the
+  // code already implements actually reaches it.
+  configSchema: z.object({ mail_domain: z.string().min(1).optional() }),
   generate(ctx) {
     const mailDomain = ctx.config["mail_domain"]
       ? String(ctx.config["mail_domain"])
@@ -202,7 +205,15 @@ export const sensitiveCmdToken: TokenTypeDefinition = {
   matchTrigger(event, tokenId) {
     const http = httpOf(event);
     if (!http || !eventMentionsToken(event, tokenId)) return { matched: false };
-    if (!http.path.startsWith(`/${tokenId}/cmd/`)) return { matched: false };
+    // Match `/id/cmd` as well as `/id/cmd/...`: the bare path is served
+    // (it falls back to the default command output), so an attacker hitting
+    // it produced a response but no incident.
+    if (
+      http.path !== `/${tokenId}/cmd` &&
+      !http.path.startsWith(`/${tokenId}/cmd/`)
+    ) {
+      return { matched: false };
+    }
     return { matched: true, severity: "high" };
   },
 };

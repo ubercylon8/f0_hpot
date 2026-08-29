@@ -35,10 +35,17 @@ export const agentInfoSchema = z.object({
 });
 export type AgentInfo = z.infer<typeof agentInfoSchema>;
 
+/**
+ * Alert channel kinds. Cross-app shape: the API validates against this and
+ * the console renders from it. It previously lived here unused while the
+ * API redefined its own copy inline, and the two drifted (this list was
+ * missing "loki") — exactly what AGENTS.md invariant 3 forbids.
+ */
 export const alertChannelKindSchema = z.enum([
   "email",
   "webhook",
   "syslog",
   "elasticsearch",
+  "loki",
 ]);
 export type AlertChannelKind = z.infer<typeof alertChannelKindSchema>;
