@@ -684,3 +684,200 @@ describe("fleet + dashboard API", () => {
     }
   });
 });
+
+/** Enroll one agent and return its id. */
+async function enrollAgent(app: FastifyInstance, hostname: string): Promise<string> {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/agent/enroll",
+    payload: { enrollment_token: "enroll-token", hostname, platform: "linux/amd64" },
+  });
+  expect(res.statusCode).toBe(201);
+  return (res.json() as { agent_id: string }).agent_id;
+}
+
+type SensorRow = { kind: string; enabled: boolean; config: Record<string, unknown> };
+
+async function getSensors(app: FastifyInstance, agentId: string): Promise<SensorRow[]> {
+  const list = (await app.inject({ method: "GET", url: "/api/v1/agents" })).json() as {
+    id: string;
+    sensors: SensorRow[];
+  }[];
+  return list.find((a) => a.id === agentId)?.sensors ?? [];
+}
+
+async function listTokens(
+  app: FastifyInstance,
+): Promise<{ id: string; type: string; memo: string | null }[]> {
+  return (await app.inject({ method: "GET", url: "/api/v1/tokens" })).json() as {
+    id: string;
+    type: string;
+    memo: string | null;
+  }[];
+}
+
+// A sensor whose config carries no token_id reports incidents with an empty
+// tokenId, which the ingest schema rejects — the sensor runs, listens, and
+// detects, but nothing ever reaches the console. Making the operator paste a
+// token id by hand made that the default outcome, so the server now provisions
+// the reference token itself.
+describe("sensor honeypot tokens are provisioned automatically", () => {
+  const saved = savedEnv();
+  afterEach(() => restoreEnv(saved));
+
+  it("creates a honeypot token for a sensor saved without one", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-auto");
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: { sensors: [{ kind: "ssh", enabled: true, config: { port: 22 } }] },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const sensors = await getSensors(app, agentId);
+      const tokenId = sensors[0]?.config["token_id"];
+      expect(typeof tokenId).toBe("string");
+      expect(tokenId).not.toBe("");
+
+      const token = (await listTokens(app)).find((t) => t.id === tokenId);
+      expect(token?.type).toBe("honeypot");
+      // Named for the host and the sensor it backs, so the token list stays
+      // readable once a fleet has a few dozen of them.
+      expect(token?.memo).toBe("sensor-auto · ssh");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("gives each sensor on a host its own token", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-multi");
+      await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: {
+          sensors: [
+            { kind: "ssh", enabled: true, config: { port: 22 } },
+            { kind: "rdp", enabled: true, config: { port: 3389 } },
+          ],
+        },
+      });
+
+      const sensors = await getSensors(app, agentId);
+      const ids = sensors.map((s) => s.config["token_id"]);
+      expect(new Set(ids).size).toBe(2);
+      expect((await listTokens(app)).filter((t) => t.type === "honeypot").length).toBe(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("re-saving an unchanged sensor set creates no further tokens", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-idempotent");
+      await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: { sensors: [{ kind: "ssh", enabled: true, config: { port: 22 } }] },
+      });
+      const first = await getSensors(app, agentId);
+      const tokenId = first[0]?.config["token_id"];
+
+      // The console round-trips the resolved config back on the next save;
+      // that must not mint a second token for the same sensor.
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: { sensors: [{ kind: "ssh", enabled: false, config: first[0]?.config }] },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const second = await getSensors(app, agentId);
+      expect(second[0]?.config["token_id"]).toBe(tokenId);
+      expect((await listTokens(app)).filter((t) => t.type === "honeypot").length).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("preserves an explicitly chosen token instead of minting one", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-explicit");
+      const chosen = await createToken(app, "honeypot");
+
+      await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: {
+          sensors: [
+            { kind: "ssh", enabled: true, config: { port: 22, token_id: chosen } },
+            { kind: "rdp", enabled: true, config: { port: 3389, token_id: chosen } },
+          ],
+        },
+      });
+
+      const sensors = await getSensors(app, agentId);
+      expect(sensors.map((s) => s.config["token_id"])).toEqual([chosen, chosen]);
+      expect((await listTokens(app)).filter((t) => t.type === "honeypot").length).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects a sensor pointed at a token that does not exist", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-bad-token");
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: {
+          sensors: [{ kind: "ssh", enabled: true, config: { port: 22, token_id: "nosuchtoken" } }],
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { message: string }).message).toContain("nosuchtoken");
+      // The whole save is rejected, so the agent keeps its previous config
+      // rather than half-applying a broken one.
+      expect(await getSensors(app, agentId)).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects a sensor pointed at a revoked token", async () => {
+    process.env.F0_ENROLLMENT_TOKEN = "enroll-token";
+    const app = await makeServer();
+    try {
+      const agentId = await enrollAgent(app, "sensor-revoked-token");
+      const dead = await createToken(app, "honeypot");
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/tokens/bulk",
+        payload: { ids: [dead], action: "revoke" },
+      });
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/agents/${agentId}/sensors`,
+        payload: {
+          sensors: [{ kind: "ssh", enabled: true, config: { port: 22, token_id: dead } }],
+        },
+      });
+      expect(res.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});

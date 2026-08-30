@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getTokenType } from "@f0/deception-tokens-core";
 import type { Db } from "../db/index.js";
 import { agentDeployments, agents, agentSensors, tokens, tokenFiles } from "../db/schema.js";
-import { newId } from "../ids.js";
+import { newId, newTokenId } from "../ids.js";
 import { hashAgentKey, verifyAgentKey } from "../auth.js";
 import { consumeEnrollmentToken } from "../enrollment.js";
 import { agentStatus, pollIntervalSeconds } from "../agent-status.js";
@@ -18,6 +18,9 @@ const SENSOR_CONFIG_SCHEMA = z.array(
     config: z.record(z.string(), z.unknown()).default({}),
   }),
 );
+
+/** A sensor named a token that can't receive its detections. */
+class SensorTokenError extends Error {}
 
 export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
   app.post(
@@ -255,9 +258,16 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
   });
 
   // Replace the sensor set for an agent.
+  //
+  // Every sensor needs a token to report against: a trigger carrying an empty
+  // tokenId is rejected by the incident ingest schema, so a sensor without one
+  // runs, listens, detects — and is never heard from. Requiring the operator to
+  // paste a token id by hand made that silence the default outcome, so a row
+  // that arrives without one gets its reference token provisioned here.
   app.put("/api/v1/agents/:id/sensors", async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!db.select().from(agents).where(eq(agents.id, id)).get()) {
+    const agent = db.select().from(agents).where(eq(agents.id, id)).get();
+    if (!agent) {
       return reply.notFound("agent not found");
     }
     const parsed = z
@@ -266,21 +276,57 @@ export function registerAgentRoutes(app: FastifyInstance, db: Db): void {
     if (!parsed.success) {
       return reply.badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
-    db.transaction((tx) => {
-      tx.delete(agentSensors).where(eq(agentSensors.agentId, id)).run();
-      for (const s of parsed.data.sensors) {
-        tx.insert(agentSensors)
-          .values({
-            id: newId("sns"),
-            agentId: id,
-            kind: s.kind,
-            enabled: s.enabled,
-            config: s.config,
-            createdAt: new Date().toISOString(),
-          })
-          .run();
-      }
-    });
+    try {
+      db.transaction((tx) => {
+        tx.delete(agentSensors).where(eq(agentSensors.agentId, id)).run();
+        for (const s of parsed.data.sensors) {
+          const now = new Date().toISOString();
+          const supplied = s.config["token_id"];
+          let tokenId = typeof supplied === "string" ? supplied.trim() : "";
+          if (tokenId) {
+            // An id that names nothing receivable is an operator typo, and one
+            // that silently swallows every detection. Reject the whole save
+            // rather than let the agent run a sensor that reports into a void.
+            const target = tx.select().from(tokens).where(eq(tokens.id, tokenId)).get();
+            if (!target) {
+              throw new SensorTokenError(`sensor "${s.kind}" names unknown token ${tokenId}`);
+            }
+            if (target.status !== "active") {
+              throw new SensorTokenError(
+                `sensor "${s.kind}" names ${target.status} token ${tokenId} — detections would be dropped`,
+              );
+            }
+          } else {
+            tokenId = newTokenId();
+            // The honeypot type's own config keys, finally populated: they
+            // render the artifact label as "Sensor reference (ssh on host)".
+            tx.insert(tokens)
+              .values({
+                id: tokenId,
+                type: "honeypot",
+                memo: `${agent.hostname} · ${s.kind}`,
+                status: "active",
+                config: { sensor: s.kind, host: agent.hostname },
+                createdAt: now,
+              })
+              .run();
+          }
+          tx.insert(agentSensors)
+            .values({
+              id: newId("sns"),
+              agentId: id,
+              kind: s.kind,
+              enabled: s.enabled,
+              config: { ...s.config, token_id: tokenId },
+              createdAt: now,
+            })
+            .run();
+        }
+      });
+    } catch (err) {
+      if (err instanceof SensorTokenError) return reply.badRequest(err.message);
+      throw err;
+    }
     return reply.send({ ok: true });
   });
 

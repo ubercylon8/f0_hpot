@@ -900,19 +900,31 @@ function CodeSigningCard() {
   );
 }
 
+// token_id is deliberately absent here: every sensor needs one, and the API
+// provisions it when a row arrives without one. It lives behind the per-row
+// "token:" disclosure for the case where several sensors should share a token.
 const SENSOR_KINDS = [
-  { id: "ssh", fields: ["port", "token_id"] },
-  { id: "http_login", fields: ["port", "token_id"] },
-  { id: "smb", fields: ["port", "token_id"] },
-  { id: "rdp", fields: ["port", "token_id"] },
-  { id: "planted_credential", fields: ["path", "label", "token_id"] },
-  { id: "file_watch", fields: ["path", "label", "token_id"] },
+  { id: "ssh", fields: ["port"] },
+  { id: "http_login", fields: ["port"] },
+  { id: "smb", fields: ["port"] },
+  { id: "rdp", fields: ["port"] },
+  { id: "planted_credential", fields: ["path", "label"] },
+  { id: "file_watch", fields: ["path", "label"] },
 ] as const;
 
 type SensorField = (typeof SENSOR_KINDS)[number]["fields"][number];
 
 function fieldsFor(kind: string): readonly SensorField[] {
-  return SENSOR_KINDS.find((k) => k.id === kind)?.fields ?? ["port", "token_id"];
+  return SENSOR_KINDS.find((k) => k.id === kind)?.fields ?? ["port"];
+}
+
+/** Render a sensor's config for the read-only list. */
+function sensorSummary(config: Record<string, unknown>): string {
+  const bits: string[] = [];
+  if (config["port"] !== undefined && config["port"] !== null) bits.push(`port ${String(config["port"])}`);
+  if (config["path"]) bits.push(String(config["path"]));
+  if (config["label"]) bits.push(`“${String(config["label"])}”`);
+  return bits.join(" · ");
 }
 
 interface SensorRowState {
@@ -922,6 +934,8 @@ interface SensorRowState {
   path: string;
   label: string;
   token_id: string;
+  /** UI-only: whether this row's token override is expanded. */
+  advanced: boolean;
 }
 
 const selectClass =
@@ -944,6 +958,7 @@ function SensorEditor({
       path: String(s.config["path"] ?? ""),
       label: String(s.config["label"] ?? ""),
       token_id: String(s.config["token_id"] ?? ""),
+      advanced: false,
     })),
   );
   const [busy, setBusy] = useState(false);
@@ -980,37 +995,61 @@ function SensorEditor({
   return (
     <div className="space-y-2 rounded-md border border-border bg-background p-3">
       {rows.map((r, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2">
-          <select value={r.kind} onChange={(e) => update(i, { kind: e.target.value })} className={`${selectClass} w-40`}>
-            {SENSOR_KINDS.map((k) => (
-              <option key={k.id}>{k.id}</option>
-            ))}
-          </select>
-          {fieldsFor(r.kind).includes("port") && (
-            <Input placeholder="port" value={r.port} onChange={(e) => update(i, { port: e.target.value })} className="h-8 w-20" />
-          )}
-          {fieldsFor(r.kind).includes("path") && (
-            <Input placeholder="/absolute/path" value={r.path} onChange={(e) => update(i, { path: e.target.value })} className="h-8 min-w-36 flex-1" />
-          )}
-          {fieldsFor(r.kind).includes("label") && (
-            <Input placeholder="label" value={r.label} onChange={(e) => update(i, { label: e.target.value })} className="h-8 w-28" />
-          )}
-          {fieldsFor(r.kind).includes("token_id") && (
-            <Input placeholder="token id" value={r.token_id} onChange={(e) => update(i, { token_id: e.target.value })} className="h-8 w-32" />
-          )}
-          <div className="flex items-center gap-1.5">
-            <Switch checked={r.enabled} onCheckedChange={(v) => update(i, { enabled: v })} />
+        <div key={i} className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={r.kind} onChange={(e) => update(i, { kind: e.target.value })} className={`${selectClass} w-40`}>
+              {SENSOR_KINDS.map((k) => (
+                <option key={k.id}>{k.id}</option>
+              ))}
+            </select>
+            {fieldsFor(r.kind).includes("port") && (
+              <Input placeholder="port" value={r.port} onChange={(e) => update(i, { port: e.target.value })} className="h-8 w-20" />
+            )}
+            {fieldsFor(r.kind).includes("path") && (
+              <Input placeholder="/absolute/path" value={r.path} onChange={(e) => update(i, { path: e.target.value })} className="h-8 min-w-36 flex-1" />
+            )}
+            {fieldsFor(r.kind).includes("label") && (
+              <Input placeholder="label" value={r.label} onChange={(e) => update(i, { label: e.target.value })} className="h-8 w-28" />
+            )}
+            <div className="flex items-center gap-1.5">
+              <Switch checked={r.enabled} onCheckedChange={(v) => update(i, { enabled: v })} />
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="font-mono text-xs text-faint"
+              aria-expanded={r.advanced}
+              onClick={() => update(i, { advanced: !r.advanced })}
+            >
+              {r.advanced ? "▾" : "▸"} token: {r.token_id || "auto"}
+            </Button>
+            <Button variant="ghost" size="sm" className="text-danger hover:text-danger" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+              remove
+            </Button>
           </div>
-          <Button variant="ghost" size="sm" className="text-danger hover:text-danger" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
-            remove
-          </Button>
+          {r.advanced && (
+            <div className="flex flex-wrap items-center gap-2 pl-2 text-xs text-faint">
+              <span>reports to</span>
+              <Input
+                placeholder="auto"
+                value={r.token_id}
+                onChange={(e) => update(i, { token_id: e.target.value })}
+                className="h-7 w-40 font-mono text-xs"
+              />
+              <span>
+                {r.token_id
+                  ? "existing token — several sensors may share one"
+                  : "a honeypot token is created for this sensor on save"}
+              </span>
+            </div>
+          )}
         </div>
       ))}
       <div className="flex gap-2 pt-1">
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", path: "", label: "", token_id: "" }])}
+          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", path: "", label: "", token_id: "", advanced: false }])}
         >
           + add sensor
         </Button>
@@ -1231,8 +1270,9 @@ function AgentDrawer({
                     <Badge variant={s.enabled ? "accent" : "default"} className="font-mono">
                       {s.kind}
                     </Badge>
-                    <span className="truncate font-mono text-xs text-faint">
-                      {JSON.stringify(s.config)}
+                    <span className="truncate text-xs text-faint">{sensorSummary(s.config)}</span>
+                    <span className="ml-auto shrink-0 font-mono text-xs text-faint">
+                      → {String(s.config["token_id"] ?? "no token")}
                     </span>
                   </div>
                 ))}

@@ -117,10 +117,15 @@ audit logs to this platform's ingest URL. Without cloud wiring they are inert
 decorations — do the one-time wiring step in the readme.
 
 ### Honeypot link
-Reference token for agent-side sensors. Create one per honeypot deployment
-(e.g. memo "SSH honeypot on DC-adjacent host") and set the sensor's
-`token_id` to it in the Agents tab. Incidents then show the honeypot
-context instead of an unrelated token type.
+Reference token for agent-side sensors — it plants nothing and can never be
+tripped from the public internet; it exists so a sensor's detections have a
+revocable entity to hang off.
+
+**You normally never create one by hand.** Add a sensor in the Agents tab and
+save: the console provisions a honeypot token for it named `<host> · <kind>`
+(e.g. `dmz-01 · ssh`). Create one here only when you want several sensors to
+report against a *shared* token — then paste its id into the `token:` field
+behind each sensor row's disclosure.
 
 > One SSH session produces TWO incidents by design: a **credential attempt**
 > (password captured) and a **command execution** (what they ran). They are

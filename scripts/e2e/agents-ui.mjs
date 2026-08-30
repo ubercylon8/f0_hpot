@@ -162,19 +162,27 @@ try {
     await row(page, MEMO).waitFor();
   });
 
-  await check("drawer: sensor editor adds and disables sensors", async () => {
+  // This check used to paste a hardcoded token id that no fixture ever
+  // created — the sensor saved happily and could never have reported a
+  // detection. Nothing is pasted now: the API provisions the token.
+  await check("drawer: sensor editor adds a sensor and auto-provisions its token", async () => {
     await row(page, HOST).click();
     await page.waitForSelector("text=Sensors");
     await page.getByRole("button", { name: "edit sensors" }).click();
     await page.getByRole("button", { name: "+ add sensor" }).click();
     const editor = page.locator("div.rounded-md.border");
     await editor.locator('input[placeholder="port"]').last().fill("12222");
-    await editor.locator('input[placeholder="token id"]').last().fill("whwmhnd54y5b");
+    // An unsaved row advertises that its token will be created on save.
+    await editor.getByRole("button", { name: /token: auto/ }).last().waitFor();
     // disable the new row's switch, then deploy
     await editor.locator('button[role="switch"]').last().click();
     await page.getByRole("button", { name: "save & deploy" }).click();
     await page.waitForSelector("text=Sensor config deployed");
     await page.locator("span.font-mono", { hasText: "http_login" }).first().waitFor();
+    // ...and every saved sensor now names a real token, never "no token".
+    if (await page.locator("text=→ no token").count()) {
+      throw new Error("a saved sensor was left without a reporting token");
+    }
     await page.keyboard.press("Escape");
   });
 
