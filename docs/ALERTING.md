@@ -71,9 +71,12 @@ interface AlertPayload {
 }
 ```
 
-`TriggerEvent` is defined in `packages/shared/src/incident.ts` and is the
-same shape used across the API and MCP tools — never redefined per
-channel.
+`TriggerEvent` is defined in `packages/shared/src/incident.ts`, which is the
+intended single source of truth for shapes crossing app boundaries: the API,
+the gateway, and the token registry all import it from there, and no alert
+channel redefines it. The MCP server is the current exception — `apps/mcp`
+declares no dependency on `packages/shared` and hand-writes its own tool
+shapes in `apps/mcp/src/server.ts`.
 
 ## Throttling
 

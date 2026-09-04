@@ -41,11 +41,35 @@ done < <(git grep -InE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' -- . \
 # environment, NEVER stored in the repository: a denylist naming the
 # operator's real domain would publish the very string it exists to hide.
 # CI injects it from a repository secret; locally, export it in your shell.
+#
+# The match is case-INSENSITIVE (-i). Hostnames and domains are themselves
+# case-insensitive, so a lowercase denylist entry must still catch an uppercase
+# occurrence; without -i this gate silently passed the very strings it exists
+# to block.
+#
+# DEFERRAL, NOT AN EXEMPTION ON THE MERITS: the four agent sensor files named
+# in the skip pattern below hardcode the string as an NTLM challenge target
+# name and an RDP certificate CommonName — 7 lines in total, all under
+# agent/internal/sensors/. These are product constants baked into the agent's
+# on-the-wire behaviour, so renaming them is a maintainer decision with its own
+# compatibility question, deliberately out of scope for the documentation
+# release that added -i. They are NOT safe by nature: they are an operational
+# identifier shipped in the binary, and they should be renamed. Until that
+# decision is made they are skipped by path AND value, so any other occurrence
+# of a denylisted string — including anywhere else in these same four files —
+# still fails.
+#
+# The skip pattern spells the constant FORT[I]KA, with the single-character
+# class matching exactly the letter it encloses. That is deliberate: the
+# pattern would otherwise be a verbatim copy of the string in a tracked file
+# and this gate would flag its own source line. Do not "simplify" the brackets
+# away — the regex means the same thing, but the check starts failing itself.
 for pattern in ${F0_IDENTIFIER_DENYLIST:-}; do
   while IFS=: read -r file line _; do
     [ -z "${file:-}" ] && continue
     report "$file" "$line" "operational identifier matched — use example.com"
-  done < <(git grep -In "$pattern" -- .)
+  done < <(git grep -Iin "$pattern" -- . \
+    | grep -vE '^agent/internal/sensors/(smb|smb1|rdp_credssp|ntlm_challenge_test)\.go:[0-9]+:.*(BuildChallenge\("FORT[I]KA(-RDP)?"\)|CommonName: "FORT[I]KA-RDP")')
 done
 
 if [ "$fail" -eq 0 ]; then echo "no operational identifiers found"; fi

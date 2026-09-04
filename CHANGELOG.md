@@ -17,8 +17,10 @@ First public release.
   `custom_image`, `dns`, `email`, `qr_code`, `word_doc`, `excel_doc`,
   `pdf_doc`, `windows_folder`, `sensitive_cmd`, `cloned_website`,
   `sql_injection`, `fast_redirect`, `aws_keys`, `azure_config`, `honeypot`.
-  Each is one file implementing `generate()` and `matchTrigger()`,
-  registered in `packages/tokens-core/src/registry.ts`.
+  Each implements `generate()` and `matchTrigger()`; related types are
+  grouped a few to a file — `network-tokens.ts`, `document-tokens.ts`,
+  `pdf-clone-tokens.ts`, `cloud-tokens.ts` — and all are registered in
+  `packages/tokens-core/src/registry.ts`.
 - **Public gateway** (`apps/gateway`) that catches token reach-back over
   HTTP, authoritative DNS, and SMTP, and forwards candidate trigger events
   to the API. The gateway never decides whether an event is a real

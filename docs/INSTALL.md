@@ -13,7 +13,7 @@ your LAN. DNS and email tokens need extra steps noted below.
 ### Prerequisites
 
 - Node.js ≥ 22 + pnpm (`npm i -g pnpm`)
-- Go ≥ 1.25 (only for the agent)
+- Go ≥ 1.26.5 (only for the agent; the version `agent/go.mod` declares)
 
 ### 1. Build
 

@@ -212,9 +212,10 @@ no privileges the console does not have. Its tool schemas are *intended* to come
 from the same zod definitions the API validates against (`packages/shared`), but
 today they do not: `apps/mcp` depends on the MCP SDK and zod only, declares no
 workspace dependency, and hand-writes its tool shapes — including the token-type
-enum. So the MCP surface can drift from the API, and adding a token type means
-editing it by hand. That is the reason invariant 7 below lists four places to
-update rather than three.
+enum, which today lists 14 of the 16 types, omitting `pdf_doc` and
+`cloned_website`. So the MCP surface can drift from the API, and adding a token
+type means editing it by hand. That is the reason invariant 7 below lists four
+places to update rather than three.
 
 ### Endpoints dial out; nothing dials in
 
