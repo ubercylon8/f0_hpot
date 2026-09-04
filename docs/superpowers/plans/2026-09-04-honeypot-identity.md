@@ -658,6 +658,11 @@ The largest task. Both the SMB2 and SMB1 negotiate responses ship a 16-byte all-
 Append to `agent/internal/sensors/persona_test.go`:
 
 ```go
+// The SMB1 response builders copy fields out of the request without
+// checking its length — req[9], req[10:12] and req[12:32] are read
+// unconditionally — so a nil request panics. Tests pass a minimal buffer.
+func smb1TestRequest() []byte { return make([]byte, 40) }
+
 // Both negotiate responses shipped a 16-byte all-zero ServerGuid. No real
 // server sends one, so it was a hard fingerprint on every deployment.
 func TestNegotiateResponsesCarryANonZeroServerGUID(t *testing.T) {
@@ -678,7 +683,7 @@ func TestNegotiateResponsesCarryANonZeroServerGUID(t *testing.T) {
 
 	// SMB1's GUID lives in the data section; assert the identity's bytes
 	// appear somewhere in the response rather than re-deriving offsets.
-	smb1 := buildSMB1NegotiateResponse(nil, id)
+	smb1 := buildSMB1NegotiateResponse(smb1TestRequest(), id)
 	if !bytes.Contains(smb1, id.GUID[:]) {
 		t.Error("SMB1 negotiate response does not carry the identity's GUID")
 	}
@@ -688,7 +693,7 @@ func TestNegotiateResponsesCarryANonZeroServerGUID(t *testing.T) {
 // contradicted the Windows version block on the same connection.
 func TestSessionSetupUsesThePersonaNativeStrings(t *testing.T) {
 	id := Resolve(map[string]interface{}{"persona": "windows-server-2019", "agent_hostname": "h"}, "smb")
-	reply := buildSMB1SessionSetupReply(nil, 0, 1, []byte{0x01}, id)
+	reply := buildSMB1SessionSetupReply(smb1TestRequest(), 0, 1, []byte{0x01}, id)
 	if !bytes.Contains(reply, utf16Encode(id.Persona.NativeOS)) {
 		t.Errorf("reply does not advertise NativeOS %q", id.Persona.NativeOS)
 	}
