@@ -912,6 +912,21 @@ const SENSOR_KINDS = [
   { id: "file_watch", fields: ["path", "label"] },
 ] as const;
 
+// Server personas the agent ships (agent/internal/sensors/persona.go is the
+// authority). An id the agent does not know falls back to its default and is
+// logged, so a stale entry here costs a missing menu option, never a dead
+// sensor. Deliberately not shared via packages/shared: a list that degrades
+// when it drifts beats one that lies.
+const SENSOR_PERSONAS = [
+  "windows-server-2019",
+  "windows-server-2022",
+  "windows-11",
+  "samba-ubuntu-2204",
+] as const;
+
+/** Sensor kinds whose advertised server identity is configurable. */
+const IDENTITY_KINDS = new Set(["smb", "rdp"]);
+
 type SensorField = (typeof SENSOR_KINDS)[number]["fields"][number];
 
 function fieldsFor(kind: string): readonly SensorField[] {
@@ -934,6 +949,9 @@ interface SensorRowState {
   path: string;
   label: string;
   token_id: string;
+  persona: string;
+  domain: string;
+  hostname: string;
   /** UI-only: whether this row's token override is expanded. */
   advanced: boolean;
 }
@@ -958,6 +976,9 @@ function SensorEditor({
       path: String(s.config["path"] ?? ""),
       label: String(s.config["label"] ?? ""),
       token_id: String(s.config["token_id"] ?? ""),
+      persona: String(s.config["persona"] ?? ""),
+      domain: String(s.config["domain"] ?? ""),
+      hostname: String(s.config["hostname"] ?? ""),
       advanced: false,
     })),
   );
@@ -980,6 +1001,9 @@ function SensorEditor({
             path: r.path || undefined,
             label: r.label || undefined,
             token_id: r.token_id || undefined,
+            persona: r.persona || undefined,
+            domain: r.domain || undefined,
+            hostname: r.hostname || undefined,
           },
         })),
       );
@@ -1043,13 +1067,57 @@ function SensorEditor({
               </span>
             </div>
           )}
+          {r.advanced && IDENTITY_KINDS.has(r.kind) && (
+            <div className="flex flex-wrap items-center gap-2 pl-2 text-xs text-faint">
+              <span>advertises as</span>
+              <select
+                value={r.persona}
+                onChange={(e) => update(i, { persona: e.target.value })}
+                className={`${selectClass} h-7 w-48 text-xs`}
+              >
+                <option value="">windows-server-2019 (default)</option>
+                {SENSOR_PERSONAS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <Input
+                placeholder="WORKGROUP"
+                value={r.domain}
+                onChange={(e) => update(i, { domain: e.target.value })}
+                className="h-7 w-32 font-mono text-xs"
+              />
+              <Input
+                placeholder="(agent hostname)"
+                value={r.hostname}
+                onChange={(e) => update(i, { hostname: e.target.value })}
+                className="h-7 w-40 font-mono text-xs"
+              />
+              <span>set the domain to blend into a real AD estate</span>
+            </div>
+          )}
         </div>
       ))}
       <div className="flex gap-2 pt-1">
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setRows([...rows, { kind: "http_login", enabled: true, port: "", path: "", label: "", token_id: "", advanced: false }])}
+          onClick={() =>
+            setRows([
+              ...rows,
+              {
+                kind: "http_login",
+                enabled: true,
+                port: "",
+                path: "",
+                label: "",
+                token_id: "",
+                persona: "",
+                domain: "",
+                hostname: "",
+                advanced: false,
+              },
+            ])
+          }
         >
           + add sensor
         </Button>
