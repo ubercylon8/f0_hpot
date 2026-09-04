@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an enhancement for f0_hpot
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem being solved
+      description: What are you trying to do that f0_hpot doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or other approaches you've tried or thought about.
+    validations:
+      required: false

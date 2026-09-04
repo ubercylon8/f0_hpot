@@ -1,0 +1,106 @@
+name: Bug report
+description: Report a problem with f0_hpot
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        **Before you paste anything below:** this project exists to plant
+        identifiers an adversary should never learn — your token domains,
+        console hostname, and gateway IPs. Logs and screenshots pasted into
+        a public issue are exactly where those leak. Please scrub them
+        first (swap in `example.com`, `203.0.113.10`, etc.).
+
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Scrubbed identifiers
+      description: >-
+        Confirm you've replaced real domains, hostnames and IP addresses in
+        everything you're about to paste below — this is a public issue, and
+        the whole point of this project is that adversaries don't get to see
+        these.
+      options:
+        - label: >-
+            I have replaced real domains, hostnames and IP addresses with
+            fictional ones (e.g. `example.com`, `203.0.113.10`) in any logs,
+            config, or screenshots below.
+          required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of f0_hpot is this about?
+      options:
+        - apps/gateway
+        - apps/api
+        - apps/web (console)
+        - apps/mcp
+        - agent/
+        - packages/tokens-core
+        - deploy/ (installer)
+        - other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse HEAD` (or the release/tag) you're running.
+      placeholder: e.g. 27e299f or v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Local demo (deploy/local-demo.env)
+        - Docker Compose
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, as minimal as you can make them.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >-
+        Paste any relevant log output, error messages, or console output.
+        Remember: scrub real domains/hostnames/IPs first (see the checkbox
+        above).
+      render: shell
+    validations:
+      required: true
