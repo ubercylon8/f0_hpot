@@ -11,19 +11,32 @@ should know about before you rely on any of this in production.
 **1. Bait *reads* cannot be detected on most modern Windows hosts.**
 NTFS last-access timestamp updates are disabled by default on current
 Windows releases (`fsutil behavior query DisableLastAccess` typically
-reports `2 (System Managed, Disabled)`). The `planted_credential` and
-`file_watch` sensors detect a read by watching a file's access time move;
-if the filesystem never updates it, a read is indistinguishable from doing
-nothing. Rather than assume this from the OS, the agent **probes it
+reports `2 (System Managed, Disabled)`). Both `planted_credential` and
+`file_watch` detect a read by watching a file's access time move; if the
+filesystem never updates it, a read is indistinguishable from doing
+nothing. **Only `planted_credential` protects you from that silently.**
+Rather than assume the caveat applies from the OS alone, it **probes it
 empirically at startup** — it arms the bait file, reads it, and checks
 whether the timestamp moved (`readsAreDetectable` in
 `agent/internal/sensors/planted.go`, backed by the platform-specific
 `atimeOf` in `agent/internal/sensors/atime_windows.go` /
-`atime_linux.go` / `atime_bsd.go`). When reads won't register, the sensor
-logs a warning naming the fix (`fsutil behavior set disablelastaccess 0`
-on Windows; check for a `noatime` mount on Linux) instead of silently
+`atime_linux.go` / `atime_bsd.go`). When reads won't register, it logs a
+warning naming the fix (`fsutil behavior set disablelastaccess 0` on
+Windows; check for a `noatime` mount on Linux) instead of silently
 pretending to watch. Writes and deletions of the bait file are still
 detected either way.
+
+`file_watch` has **no such probe and logs no such warning**. It calls the
+same platform `atimeOf` helper inside its polling loop, so it shares the
+identical blind spot on a host where last-access updates are disabled or
+the filesystem is mounted `noatime` — but nothing checks for that
+condition at startup, and nothing tells you it's happening. Point
+`file_watch` at a credential store on such a host and reads of it go
+undetected with no indication in the log that anything is wrong. Treat
+this as read-detection support you must confirm yourself (for example,
+by checking `fsutil behavior query DisableLastAccess` or the mount
+options on the target file ahead of time), not something the sensor will
+warn you about.
 
 **2. Retiring an agent from the console is not a remote uninstall.** It
 stops the agent's sensors and leaves it dormant. `DELETE
@@ -162,8 +175,9 @@ before trusting anything in it (`VerifyManifest` in
 `agent/internal/update/update.go`). Only after the manifest verifies does
 it fetch the named artifact for the current platform (matched by a
 `f0-deception-agent-<os>-<arch>[.exe]` key — `releaseArtifactName()`) and
-check that download against the manifest's checksum (`VerifyFile`) before
-staging it over the running binary and re-executing. A manifest that
+check that download's SHA-256 against the matching entry in the verified
+manifest, inline in `FetchAndApply` itself (`agent/internal/update/fetch.go`),
+before staging it over the running binary and re-executing. A manifest that
 doesn't verify, or a download that doesn't match, is discarded and logged;
 the agent keeps running its current version.
 
