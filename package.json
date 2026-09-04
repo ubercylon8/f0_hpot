@@ -2,6 +2,11 @@
   "name": "f0_deception",
   "private": true,
   "version": "0.1.0",
+  "description": "Self-hosted deception platform — canarytokens and endpoint honeypots you run yourself",
+  "repository": { "type": "git", "url": "git+https://github.com/ubercylon8/f0_hpot.git" },
+  "homepage": "https://github.com/ubercylon8/f0_hpot#readme",
+  "bugs": { "url": "https://github.com/ubercylon8/f0_hpot/issues" },
+  "keywords": ["honeypot", "canarytokens", "deception", "blue-team", "threat-detection", "self-hosted"],
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.23.0",
   "engines": {
