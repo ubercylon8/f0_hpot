@@ -40,10 +40,18 @@ sidebar with six pages; press `?` anywhere for keyboard shortcuts
 - **Agents** – fleet table (status, sensors, last seen). **Add agent**
   gives a copy-paste install one-liner. Click a row for the drawer: memo,
   sensor editor (*save & deploy* lands on the next heartbeat), retire.
-  Release binaries and Ed25519 signing keys live here too.
+  Retiring is server-side dormancy, not uninstall: the agent's key stops
+  working immediately (its past incidents are kept), and on its next
+  heartbeat it learns it was retired and shuts its sensors down — but the
+  service stays installed on the host until you run its binary with
+  `--uninstall` there yourself. Release binaries and Ed25519 signing keys
+  live here too.
 - **Alert Channels** – webhook / email / syslog / Elasticsearch / Loki.
-  Every channel has a **test** button and an enable switch (disabling
-  resets the failure counter); failing channels show a failure badge.
+  Every channel has **edit**, a **test** button, and an enable switch
+  (disabling resets the failure counter); failing channels show a failure
+  badge. Editing re-shows a masked `•••` in place of any stored secret —
+  leave it as the mask (or blank) to keep the stored value, or type a new
+  one to replace it; the mask is never written back as a literal secret.
 - **Settings** – API keys (create → shown once, revoke), server status
   (GeoIP, enrollment, throttle), and an open-mode warning when the API
   is running unauthenticated.
@@ -71,7 +79,8 @@ and any fetch fires a medium alert. Re-upload replaces the image.
 Create `dns` → you get `<id>.tokens.example.com`. Any lookup of it or its
 subdomains alerts. Plant in: `hosts` files, documentation, tool configs.
 
-> Requires your domain's DNS pointed at the gateway.
+> Requires your token domain delegated to (or served by) the gateway's
+> authoritative DNS — see `docs/INSTALL.md` § DNS delegation.
 
 ### Unique email address
 Create `email` → `<id>@tokens.example.com`. Plant in breach-filler accounts,
@@ -97,9 +106,15 @@ shows the clone status — if the fetch failed or the target page changed,
 fix the target and hit **re-clone now** there.
 
 ### Windows folder
-Create a folder named exactly like the artifact shown (e.g.
-`abc123@tokens.example.com`). When anyone browses that folder over SMB,
-Windows resolves the name via DNS → alert.
+Create `windows_folder` → download the generated `desktop.ini` (plus a
+readme). Drop `desktop.ini` into a folder an intruder would browse (e.g.
+`Finance\Payroll Exports`), then mark the folder and file `system`/`hidden`
+(`attrib +s`/`attrib +h`) so Explorer actually reads it. Its `IconResource`
+points at a UNC path on the token's hostname; browsing the folder makes
+Explorer resolve that hostname to fetch the icon, which is what fires the
+alert — nothing needs to be opened. Explorer caches folder icons, so test
+from a machine that hasn't browsed the folder before. See
+`docs/TOKEN-TYPES.md` for the full mechanism.
 
 ### SQL injection canary
 Generates an nginx/Apache snippet redirecting a decoy path (default
@@ -216,5 +231,5 @@ detail/acknowledge, list agents, platform stats. No destructive operations.
 | DNS token silent | check :53/:15353 listener + NS/A records; test with `dig -p PORT @host name` |
 | Agent shows offline | heartbeat every 60s — check `~/.f0-deception/agent.yaml` server URL matches |
 | "sensor not available in this build" | rebuild the agent binary |
-| Email token silent | MX record + port 25 reachability; spam filters may block first |
+| Email token silent | MX record + the gateway's actual SMTP ingest port (`F0_SMTP_PORT`, default `2525` — not 25 unless you chose that) reachable from the sender; spam filters may block first |
 | Word doc doesn't alert | viewer blocked external content; PDF viewers vary — prefer web bugs for reliability |
