@@ -20,17 +20,17 @@
     "fastify": "^5.0.0",
     "mmdb-lib": "^3.0.3",
     "nanoid": "^5.0.0",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^9.1.0",
     "qrcode": "^1.5.4",
-    "zod": "^4.0.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^26.3.0",
+    "@types/node": "^26.4.0",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
     "drizzle-kit": "^0.31.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   }
