@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Read first
 
 - `AGENTS.md` — repo layout, invariants, env var reference, roadmap. The invariants section ("Conventions & invariants") is binding.
-- `docs/HANDOFF.md` — project state, architecture-decision rationale, and hard-won gotchas (stale tsx processes, SMB/impacket conformance, DNS zone-cut occlusion, local demo env). Check §5 before debugging anything weird.
+- `ARCHITECTURE.md` — component boundaries, the trigger flow, and the reasoning behind the invariants.
 
 ## Commands
 

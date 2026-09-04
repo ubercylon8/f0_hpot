@@ -5,8 +5,7 @@ plus agent-deployed honeypots/sensors, web console, and MCP server.
 
 ## Hand-off
 
-Continuing this work? Read `docs/HANDOFF.md` — pending items, architecture
-decision rationale, and debugging gotchas.
+- `ARCHITECTURE.md` — component boundaries, the trigger flow, and the reasoning behind the invariants.
 
 ## Repo layout
 

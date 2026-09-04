@@ -29,3 +29,9 @@ deploy/certs/
 deploy/data/
 deploy/release-bin/
 deploy/Caddyfile
+
+# Session working notes. These carry live deployment details (IPs, domains,
+# lab hostnames) and are deliberately NOT version-controlled. They remain on
+# disk for the maintainer; their durable content is published in
+# ARCHITECTURE.md and docs/HARDENING-LOG.md.
+docs/internal/
