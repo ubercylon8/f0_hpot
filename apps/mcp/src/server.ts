@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { tokenTypeSchema } from "@f0/deception-shared";
 import http from "node:http";
 
 const API_BASE = process.env.F0_API_BASE_URL ?? "http://127.0.0.1:8443";
@@ -52,22 +53,11 @@ s.tool(
   "create_token",
   "Create a new canarytoken. Returns the artifacts to deploy (URLs, hostnames, or file downloads).",
   {
-    type: z.enum([
-      "web_bug",
-      "custom_image",
-      "dns",
-      "qr_code",
-      "email",
-      "word_doc",
-      "excel_doc",
-      "windows_folder",
-      "sql_injection",
-      "aws_keys",
-      "azure_config",
-      "honeypot",
-      "sensitive_cmd",
-      "fast_redirect",
-    ]).describe("Token type"),
+    // Derived from packages/shared rather than restated here. A
+    // hand-written copy had already lost pdf_doc and cloned_website, so
+    // neither could be created through MCP while every document promised
+    // all 16. packages/tokens-core guards the schema against the registry.
+    type: tokenTypeSchema.describe("Token type"),
     memo: z.string().max(500).optional().describe("What this token is for / where it's planted"),
     config: z.record(z.string(), z.unknown()).optional()
       .describe("Type-specific config, e.g. {target_url} for fast_redirect, {cmd_name} for sensitive_cmd"),

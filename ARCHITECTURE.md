@@ -208,14 +208,14 @@ must arrive unproxied for the source IP to mean anything.
 
 The **MCP server** is the same management and triage surface exposed to an LLM
 over stdio or streamable HTTP. It calls the API like any other client and gets
-no privileges the console does not have. Its tool schemas are *intended* to come
-from the same zod definitions the API validates against (`packages/shared`), but
-today they do not: `apps/mcp` depends on the MCP SDK and zod only, declares no
-workspace dependency, and hand-writes its tool shapes — including the token-type
-enum, which today lists 14 of the 16 types, omitting `pdf_doc` and
-`cloned_website`. So the MCP surface can drift from the API, and adding a token
-type means editing it by hand. That is the reason invariant 7 below lists four
-places to update rather than three.
+no privileges the console does not have. Its token-type enum comes from the same zod
+definition the API validates against (`tokenTypeSchema` in `packages/shared`).
+It did not until recently: `apps/mcp` declared no workspace dependency and
+hand-wrote its tool shapes, and that copy had silently lost `pdf_doc` and
+`cloned_website`, so neither could be created through MCP while every document
+promised all 16. A test in `packages/tokens-core` now asserts the shared enum
+matches the registry exactly, so a type added to one and not the other fails the
+build rather than going missing from an interface.
 
 ### Endpoints dial out; nothing dials in
 
@@ -376,14 +376,14 @@ the API decides whether touching it was a trigger, and if those two disagree
 the token is *silently* undetectable. It serves its pixel, it 404s the
 incident, and nothing anywhere reports a fault. Every new type needs
 registry-side match tests plus a live end-to-end trigger before it can be
-trusted. Registering a type also means updating it in four places: the shared
-enum, the tokens-core definition and registry, the console's type list, and the
-MCP tool enum.
+trusted. Registering a type also means updating it in three places: the shared
+enum, the tokens-core definition and registry, and the console's type list. The
+MCP server derives its enum from the shared one, and a tokens-core test asserts
+that shared enum matches the registry.
 
 Two more that are conventions rather than mechanisms, but break things just as
 effectively: cross-app data shapes belong in `packages/shared` zod schemas —
-the API and console validate against those definitions, while `apps/mcp` still
-redeclares its own copies and so has to be kept in step by hand — and
+the API, console and MCP server all validate against those definitions — and
 configuration comes from `F0_*` environment variables with no secrets in code.
 
 ## Where to look

@@ -121,6 +121,9 @@ importers:
 
   apps/mcp:
     dependencies:
+      '@f0/deception-shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.30.0(zod@4.4.3)

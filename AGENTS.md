@@ -13,7 +13,7 @@ plus agent-deployed honeypots/sensors, web console, and MCP server.
 - `apps/gateway` — public trigger catcher: HTTP catch-all (artifacts: pixel gifs, redirects) + authoritative DNS server (dns-packet/UDP).
 - `apps/web` — React 19 + Vite + Tailwind console (Phase 1+).
 - `apps/mcp` — MCP server (stdio + streamable HTTP) for management/triage.
-- `packages/shared` — zod schemas; intended single source of truth for API validation AND MCP tool definitions. `apps/mcp` currently redeclares its shapes by hand instead of depending on this package — see the note under invariant 3.
+- `packages/shared` — zod schemas; single source of truth for API validation and MCP tool definitions; a tokens-core test asserts its token-type enum matches the registry — see the note under invariant 3.
 - `packages/tokens-core` — token type registry. Each token type = `{configSchema, generate(), matchTrigger()}`.
 - `agent/` — Go agent (fork of achilles-agent skeleton): enroll → heartbeat → poll → execute sensors → report.
 - `deploy/` — docker-compose + Caddy.
@@ -44,7 +44,7 @@ F0_API_BASE_URL=http://127.0.0.1:18443 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 npx 
 
 1. **Token IDs are lowercase-only** (`23456789abcdefghjkmnpqrstuvwxyz`). Hostnames/DNS are case-insensitive and get lowercased at the gateway; an uppercase ID would never match.
 2. **Token id may sit at ANY label depth** under the base domain (`sub.<id>.tokens.example.com`). The gateway forwards every matching candidate label; the API drops ids that aren't live tokens (404 is benign in gateway logs).
-3. All cross-app data shapes should live in `packages/shared` zod schemas — never redefine them locally. `apps/mcp` is the current exception: it has no dependency on `packages/shared` and hand-writes its own shapes (e.g. the token-type enum in `apps/mcp/src/server.ts`), so adding a token type today means updating that file too until it is wired up to depend on `packages/shared` like the other apps.
+3. All cross-app data shapes should live in `packages/shared` zod schemas — never redefine them locally. `apps/mcp` derives its token-type enum from `tokenTypeSchema`; it still hand-declares a few inline response shapes, which are read-only and local to one tool.
 4. New token types = one file in `packages/tokens-core/src/` implementing `TokenTypeDefinition` + registration. Trigger rules in `matchTrigger` must mirror artifact paths served by the gateway's `artifactResponder`.
 5. The gateway parses attacker-controlled input by definition: cap sizes, never shell out, no dynamic path→filesystem mapping. These are design rules the current code upholds, not something a tool checks for you — see `ARCHITECTURE.md` (Components) for why the `.semgrep.yml` rules meant to cover this can't match.
 6. No secrets in code; config via env (`F0_*`). `.env.example` documents each var.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { listTokenTypes, getTokenType, matchEventToType } from "./registry.js";
-import type { TriggerEvent } from "@f0/deception-shared";
+import { tokenTypeSchema, type TriggerEvent } from "@f0/deception-shared";
 
 function httpEvent(overrides: Partial<TriggerEvent> = {}): TriggerEvent {
   return {
@@ -14,6 +14,19 @@ function httpEvent(overrides: Partial<TriggerEvent> = {}): TriggerEvent {
 }
 
 describe("registry", () => {
+  // packages/shared is meant to be the single source of truth for token
+  // types, but nothing checked that its enum still matched what the
+  // registry actually registers. It had already drifted somewhere else:
+  // the MCP server hand-wrote its own 14-entry copy and silently lost
+  // pdf_doc and cloned_website, so neither could be created through it
+  // while every document promised 16. This guards the pair that every
+  // other consumer derives from.
+  it("tokenTypeSchema matches the registered types exactly", () => {
+    const registered = listTokenTypes().map((d) => d.id).sort();
+    const declared = [...tokenTypeSchema.options].sort();
+    expect(declared).toEqual(registered);
+  });
+
   it("lists v1 network tokens", () => {
     const ids = listTokenTypes().map((d) => d.id);
     expect(ids).toContain("web_bug");
