@@ -30,7 +30,7 @@ First public release.
   heartbeat, and configuration (`agent_sensors` table, delivered over
   heartbeat rather than local config) covering six sensor kinds
   (`sensorKindSchema` in `packages/shared/src/agent.ts`): `ssh`,
-  `http_login`, `smb_share`, `rdp_banner`, `planted_credential`,
+  `http_login`, `smb`, `rdp`, `planted_credential`,
   `file_watch`. Self-update manifests are Ed25519-signed and verified
   against an embedded public key before a release is applied
   (`agent/internal/update/update.go`).

@@ -58,7 +58,7 @@ behind it.
 `word_doc`, `excel_doc`, `pdf_doc`, `windows_folder`, `sensitive_cmd`,
 `sql_injection`, `aws_keys`, `azure_config`, `honeypot`.
 
-**6 agent sensor kinds:** `ssh`, `http_login`, `smb_share`, `rdp_banner`,
+**6 agent sensor kinds:** `ssh`, `http_login`, `smb`, `rdp`,
 `planted_credential`, `file_watch` — configured from the console and
 delivered down the heartbeat, never from a config file on the endpoint.
 
