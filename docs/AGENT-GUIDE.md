@@ -66,6 +66,8 @@ name an existing, active token, or the whole sensor-set save is rejected
 with a 400 — the field exists so several sensors can deliberately share
 one token, not so you have to mint one by hand for every sensor.
 
+![The agents page: fleet status, sensor chips, release binaries and signing keys](img/console-agents.png)
+
 ## Enrollment
 
 An agent needs a server URL and an enrollment token to register. Two kinds

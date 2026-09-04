@@ -56,6 +56,10 @@ sidebar with six pages; press `?` anywhere for keyboard shortcuts
   (GeoIP, enrollment, throttle), and an open-mode warning when the API
   is running unauthenticated.
 
+![The tokens table: types, memos, hit counts and status](img/console-tokens.png)
+
+![The incident feed: severity, geo, captured evidence and triage notes](img/console-incidents.png)
+
 ## 3. Token playbook
 
 ### Web bug (URL pixel)
