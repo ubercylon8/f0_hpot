@@ -23,6 +23,16 @@ const (
 	statusLogonFailure   = 0xC000006D
 )
 
+// filetimeNow renders the current time as a little-endian FILETIME: 100ns
+// ticks since 1601-01-01, which is 116444736000000000 ticks before the Unix
+// epoch. Both negotiate responses used to ship the same frozen literal.
+func filetimeNow() []byte {
+	ft := uint64(time.Now().UTC().UnixNano()/100) + 116444736000000000
+	out := make([]byte, 8)
+	binary.LittleEndian.PutUint64(out, ft)
+	return out
+}
+
 // spnegoInitNTLM is a minimal SPNEGO NegTokenInit offering only NTLMSSP.
 func spnegoInitNTLM() []byte {
 	oid := []byte{0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x02, 0x0a} // NTLMSSP OID
@@ -33,7 +43,7 @@ func spnegoInitNTLM() []byte {
 
 // buildSMB1NegotiateResponse answers a core/NTLM negotiate with extended
 // security so clients send SPNEGO blobs we already understand.
-func buildSMB1NegotiateResponse(req []byte) []byte {
+func buildSMB1NegotiateResponse(req []byte, id Identity) []byte {
 	blob := spnegoInitNTLM()
 	dialectIdx := selectDialectIndex(req)
 
@@ -62,15 +72,19 @@ func buildSMB1NegotiateResponse(req []byte) []byte {
 	w32(65535)                  // MaxRawSize
 	w32(0)                      // SessionKey
 	w32(0x800002D0)             // Capabilities: EXT_SECURITY|NT_FIND|LEVEL2_OPLOCKS|STATUS32|NT_SMBS
-	// SystemTime: fixed plausible value (Low + High)
-	words = append(words, 0x20, 0xC4, 0x9A, 0x0D, 0xD5, 0x35, 0xD9, 0x01)
+	// SystemTime (Low + High). This was a fixed literal, so every honeypot
+	// reported the same instant in 2023 forever.
+	words = append(words, filetimeNow()...)
 	w(0) // ServerTimeZone
 	// ChallengeLength = security blob length (extended security carries the
 	// SPNEGO blob where a raw challenge would be)
 	words = append(words, byte(len(blob)))
 
 	// Data section: ServerGUID(16) + security blob; ByteCount covers both.
-	data := append(make([]byte, 16), blob...)
+	// The GUID shipped as 16 zero bytes, which no real server sends.
+	data := make([]byte, 0, 16+len(blob))
+	data = append(data, id.GUID[:]...)
+	data = append(data, blob...)
 	out := append(hdr, words...)
 	out = append(out, byte(len(data)), byte(len(data)>>8))
 	return append(out, data...)
@@ -107,7 +121,7 @@ func selectDialectIndex(req []byte) int {
 
 // buildSMB1SessionSetupReply answers a Session Setup AndX with a status
 // and optional security blob, echoing the client's PID/UID/MID.
-func buildSMB1SessionSetupReply(req []byte, status uint32, uid uint16, blob []byte) []byte {
+func buildSMB1SessionSetupReply(req []byte, status uint32, uid uint16, blob []byte, id Identity) []byte {
 	hdr := make([]byte, 32)
 	copy(hdr[0:4], "\xffSMB")
 	hdr[4] = smb1CmdSessionSetup
@@ -123,9 +137,11 @@ func buildSMB1SessionSetupReply(req []byte, status uint32, uid uint16, blob []by
 	words := []byte{4, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, byte(len(blob)), 0x00}
 	// Data = blob + NativeOS + NativeLanMan (z-strings); ByteCount covers all
 	// Unicode z-strings: utf16le + double-null terminator
-	native := utf16Encode("Unix")
+	// Hardcoded Unix/Samba here contradicted the Windows version block the
+	// NTLM challenge sent on the same connection.
+	native := utf16Encode(id.Persona.NativeOS)
 	native = append(native, 0, 0)
-	native = append(native, utf16Encode("Samba")...)
+	native = append(native, utf16Encode(id.Persona.NativeLanMan)...)
 	native = append(native, 0, 0)
 	byteCount := len(blob) + len(native)
 	out := append(hdr, words...)
@@ -167,8 +183,8 @@ func buildSMB1LegacyNegotiateResponse(req []byte) ([]byte, [8]byte, error) {
 	w32(65535)                  // MaxRawSize
 	w32(0)                      // SessionKey
 	w32(0x000002D0)             // Capabilities: NO extended security
-	words = append(words, 0x20, 0xC4, 0x9A, 0x0D)
-	words = append(words, 0xD5, 0x35, 0xD9, 0x01)
+	// SystemTime, previously a fixed literal shared by every deployment.
+	words = append(words, filetimeNow()...)
 	w(0)                     // ServerTimeZone
 	words = append(words, 8) // ChallengeLength
 
@@ -191,7 +207,7 @@ func clientRequestedExtendedSecurity(req []byte) bool {
 // SessionKey(4) AnsiPwdLen(2) UniPwdLen(2) Reserved(4) Capabilities(4),
 // ByteCount(2), then data: ansiPwd, uniPwd, account, domain, nativeOS...
 // Field offsets are absolute from the start of the SMB message.
-func handleSMB1LegacySetup(t *smbTransport, buf []byte, challenge [8]byte, uid uint16, tokenID string, report Reporter) {
+func handleSMB1LegacySetup(t *smbTransport, buf []byte, challenge [8]byte, uid uint16, tokenID string, id Identity, report Reporter) {
 	if len(buf) < 61 {
 		return
 	}
@@ -248,18 +264,18 @@ func handleSMB1LegacySetup(t *smbTransport, buf []byte, challenge [8]byte, uid u
 		},
 		SeenAt: time.Now().UTC(),
 	})
-	_ = t.writeMsg(buildSMB1SessionSetupReply(buf, statusLogonFailure, uid, nil))
+	_ = t.writeMsg(buildSMB1SessionSetupReply(buf, statusLogonFailure, uid, nil, id))
 }
 
 // handleSMB1 runs the SMB1 state machine after the negotiate frame.
-func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporter) {
+func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, id Identity, report Reporter) {
 	// Negotiate: extended (SPNEGO) vs legacy (raw challenge) by flags2.
 	if len(firstMsg) < 35 || firstMsg[4] != smb1CmdNegotiate {
 		return
 	}
 	var challenge [8]byte
 	if clientRequestedExtendedSecurity(firstMsg) {
-		if err := t.writeMsg(buildSMB1NegotiateResponse(firstMsg)); err != nil {
+		if err := t.writeMsg(buildSMB1NegotiateResponse(firstMsg, id)); err != nil {
 			return
 		}
 	} else {
@@ -286,7 +302,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 			return
 		}
 		if !clientRequestedExtendedSecurity(firstMsg) {
-			handleSMB1LegacySetup(t, buf, challenge, uid, tokenID, report)
+			handleSMB1LegacySetup(t, buf, challenge, uid, tokenID, id, report)
 			return
 		}
 		blob := findNTLMBlob(buf)
@@ -295,7 +311,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 		}
 		switch {
 		case IsNegotiate(blob):
-			chalMsg, chal, err := BuildChallenge("FORTIKA")
+			chalMsg, chal, err := BuildChallenge(id)
 			if err != nil {
 				return
 			}
@@ -308,7 +324,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 			body := append([]byte{0x30, byte(len(inner))}, inner...)
 			resp := append([]byte{0xa1, byte(len(body))}, body...)
 			uid += 0x10
-			if err := t.writeMsg(buildSMB1SessionSetupReply(buf, statusMoreProcessing, uid, resp)); err != nil {
+			if err := t.writeMsg(buildSMB1SessionSetupReply(buf, statusMoreProcessing, uid, resp, id)); err != nil {
 				return
 			}
 
@@ -337,7 +353,7 @@ func handleSMB1(t *smbTransport, firstMsg []byte, tokenID string, report Reporte
 				},
 				SeenAt: time.Now().UTC(),
 			})
-			_ = t.writeMsg(buildSMB1SessionSetupReply(buf, statusLogonFailure, uid, nil))
+			_ = t.writeMsg(buildSMB1SessionSetupReply(buf, statusLogonFailure, uid, nil, id))
 			return
 
 		default:

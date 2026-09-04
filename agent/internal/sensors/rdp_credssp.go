@@ -22,7 +22,7 @@ import (
 // We present a runtime-generated self-signed certificate. Real mstsc shows
 // a cert warning; scripted attackers (hydra, crowbar, custom tooling)
 // typically skip verification and hand over credentials.
-func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
+func handleRDPCredSSP(tlsConn net.Conn, tokenID string, id Identity, report Reporter) {
 	defer tlsConn.Close()
 	tlsConn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	tlsConn.SetWriteDeadline(time.Now().Add(15 * time.Second))
@@ -42,7 +42,7 @@ func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
 		blob := req[idx:]
 		switch {
 		case IsNegotiate(blob):
-			chalMsg, chal, err := BuildChallenge("FORTIKA-RDP")
+			chalMsg, chal, err := BuildChallenge(id)
 			if err != nil {
 				return
 			}
@@ -82,19 +82,23 @@ func handleRDPCredSSP(tlsConn net.Conn, tokenID string, report Reporter) {
 	}
 }
 
-var cachedCert *tls.Certificate
-
-func selfSignedCert() *tls.Certificate {
-	if cachedCert != nil {
-		return cachedCert
-	}
+// selfSignedCert generates a fresh certificate for the given identity. It
+// used to cache its result in a package-level variable; that cache would
+// have handed every sensor the first identity's certificate, silently
+// defeating per-identity certificates for every RDP sensor after the first,
+// so it is not reintroduced here.
+//
+// Call it once per sensor generation (RDPSensor.Start does), never per
+// connection: an RSA-2048 keygen costs ~100ms and NLA is the common path.
+func selfSignedCert(id Identity) *tls.Certificate {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "FORTIKA-RDP"},
+		Subject:      pkix.Name{CommonName: id.DNSHostname},
+		DNSNames:     []string{id.DNSHostname},
 		NotBefore:    time.Now().Add(-24 * time.Hour),
 		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -104,14 +108,13 @@ func selfSignedCert() *tls.Certificate {
 	if err != nil {
 		return nil
 	}
-	cachedCert = &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
-	return cachedCert
+	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
-// upgradeRDPToTLS wraps an established RDP connection in TLS using our
-// self-signed certificate. Returns nil if handshake fails (client rejected).
-func upgradeRDPToTLS(raw net.Conn) net.Conn {
-	cert := selfSignedCert()
+// upgradeRDPToTLS wraps an established RDP connection in TLS using the
+// sensor's self-signed certificate, generated once at Start. Returns nil if
+// there is no certificate or the handshake fails (client rejected).
+func upgradeRDPToTLS(raw net.Conn, cert *tls.Certificate) net.Conn {
 	if cert == nil {
 		return nil
 	}

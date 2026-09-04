@@ -21,10 +21,17 @@ func (SMBSensor) Name() string { return "smb" }
 func (SMBSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 445)
 	tokenID := str(cfg, "token_id", "")
-	return serveTCPSensor(ctx, "smb", port, tokenID, handleSMBConn, report)
+	// Resolved once and closed over, so serveTCPSensor's shared handler
+	// type stays a plain func(net.Conn, string, Reporter).
+	id := Resolve(cfg, "smb")
+	log.Printf("[smb] identity: persona=%s domain=%s computer=%s", id.Persona.ID, id.NBDomain, id.NBComputer)
+	handle := func(conn net.Conn, tokenID string, report Reporter) {
+		handleSMBConn(conn, tokenID, id, report)
+	}
+	return serveTCPSensor(ctx, "smb", port, tokenID, handle, report)
 }
 
-func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
+func handleSMBConn(conn net.Conn, tokenID string, id Identity, report Reporter) {
 	defer conn.Close()
 	t := newSMBTransport(conn)
 	buf, err := t.readHead()
@@ -67,11 +74,11 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 			Detail:   detail,
 			SeenAt:   time.Now().UTC(),
 		})
-		handleSMB1(t, buf, tokenID, report)
+		handleSMB1(t, buf, tokenID, id, report)
 		return
 	}
 
-	resp := buildSMB2NegotiateResponse()
+	resp := buildSMB2NegotiateResponse(id)
 	if err := t.writeMsg(resp); err != nil {
 		return
 	}
@@ -84,13 +91,13 @@ func handleSMBConn(conn net.Conn, tokenID string, report Reporter) {
 		SeenAt:   time.Now().UTC(),
 	})
 
-	smbSessionLoop(t, tokenID, report)
+	smbSessionLoop(t, tokenID, id, report)
 }
 
 // smbSessionLoop handles SESSION_SETUP exchanges after negotiation,
 // running one NTLM challenge round and capturing whatever credentials
 // the client volunteers.
-func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
+func smbSessionLoop(t *smbTransport, tokenID string, id Identity, report Reporter) {
 	// The server challenge is issued with the CHALLENGE message and needed
 	// again when the AUTHENTICATE arrives a round trip later. Without it the
 	// hashcat line carries a zeroed challenge and cannot be cracked.
@@ -117,7 +124,7 @@ func smbSessionLoop(t *smbTransport, tokenID string, report Reporter) {
 
 		switch {
 		case IsNegotiate(secBlob):
-			challengeMsg, chal, err := BuildChallenge("FORTIKA")
+			challengeMsg, chal, err := BuildChallenge(id)
 			if err != nil {
 				return
 			}
@@ -210,22 +217,27 @@ func buildSMB2StatusReply(status uint32, sessionID uint64, blob []byte) []byte {
 
 // buildSMB2NegotiateResponse returns header(64) + fixed body(64) + SPNEGO/NTLM
 // token, per MS-SMB2 2.2.4. Enough for scanners to attempt session setup.
-func buildSMB2NegotiateResponse() []byte {
+func buildSMB2NegotiateResponse(id Identity) []byte {
 	hdr := make([]byte, 64)
 	copy(hdr[0:4], "\xfeSMB")
 	hdr[4] = 64   // StructureSize
 	hdr[6] = 0x01 // Flags: SERVER_TO_REDIR
 
 	body := make([]byte, 64)
-	binary.LittleEndian.PutUint16(body[0:2], 65)           // StructureSize
-	binary.LittleEndian.PutUint16(body[2:4], 0x02)         // SecurityMode: signing disabled
-	binary.LittleEndian.PutUint16(body[4:6], 0x0202)       // Dialect 2.0.2
+	binary.LittleEndian.PutUint16(body[0:2], 65) // StructureSize
+	// MS-SMB2 2.2.4: 0x0002 is SMB2_NEGOTIATE_SIGNING_REQUIRED (0x0001 is
+	// SMB2_NEGOTIATE_SIGNING_ENABLED). The comment here used to say
+	// "signing disabled", the opposite of what the value means.
+	binary.LittleEndian.PutUint16(body[2:4], 0x02)   // SecurityMode: signing required
+	binary.LittleEndian.PutUint16(body[4:6], 0x0202) // Dialect 2.0.2
+	// ServerGuid: previously never written, so every deployment shipped the
+	// same 16 zero bytes. No real server does.
+	copy(body[8:24], id.GUID[:])
 	binary.LittleEndian.PutUint32(body[24:28], 0x00000001) // Capabilities: DFS
 	binary.LittleEndian.PutUint32(body[28:32], 8192)       // MaxTransactionSize
 	binary.LittleEndian.PutUint32(body[32:36], 65536)      // MaxReadSize
 	binary.LittleEndian.PutUint32(body[36:40], 65536)      // MaxWriteSize
-	now := uint64(time.Now().UnixNano()) + 116444736000000000
-	binary.LittleEndian.PutUint64(body[40:48], now)
+	copy(body[40:48], filetimeNow())
 	binary.LittleEndian.PutUint16(body[48:50], 128) // SecurityBufferOffset
 
 	token := ntlmSpnegoPlaceholder()

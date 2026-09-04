@@ -22,11 +22,27 @@ const (
 	ntlmTypeAuthenticate = 3
 )
 
-// ntlmFlags we advertise on the challenge. Deliberately NOT advertising
-// key exchange or strong crypto so clients fall back to crackable
-// NTLMv1/v2 responses over our challenge.
-const ntlmChallengeFlags = 0x00008201 | // NEGOTIATE_NTLM | REQUEST_TARGET | NEGOTIATE_UNICODE
-	0x02000000 // NEGOTIATE_VERSION
+// NTLM negotiate flags (MS-NLMP 2.2.2.5). Named so the constant below
+// cannot drift from its own comment, as it did: the value was 0x00008201
+// while the comment claimed REQUEST_TARGET, which is not among those bits.
+const (
+	ntlmNegotiateUnicode    = 0x00000001
+	ntlmRequestTarget       = 0x00000004
+	ntlmNegotiateSign       = 0x00000010
+	ntlmNegotiateSeal       = 0x00000020
+	ntlmNegotiateNTLM       = 0x00000200
+	ntlmNegotiateAlwaysSign = 0x00008000
+	// ntlmNegotiateVersion is the only flag a persona controls; it is set
+	// with the VERSION structure and cleared without it. Real Samba sends
+	// neither.
+	ntlmNegotiateVersion = 0x02000000
+	ntlmNegotiateKeyExch = 0x40000000
+)
+
+// ntlmChallengeFlags we advertise on the challenge. Deliberately NOT
+// advertising key exchange or strong crypto (sign/seal) so clients fall
+// back to crackable NTLMv1/v2 responses over our challenge.
+const ntlmChallengeFlags = ntlmNegotiateUnicode | ntlmNegotiateNTLM | ntlmNegotiateAlwaysSign
 
 // findNTLMBlob locates the NTLMSSP signature inside a security blob,
 // which may be raw or SPNEGO-wrapped.
@@ -158,34 +174,69 @@ func avPair(id uint16, value string) []byte {
 	return append(out, v...)
 }
 
+// encodeVersion renders the VERSION structure (MS-NLMP 2.2.2.10). The build is
+// a little-endian uint16; writing those two bytes by hand is how this file
+// came to advertise build 46855.
+func encodeVersion(major, minor uint8, build uint16) []byte {
+	return []byte{major, minor, byte(build), byte(build >> 8), 0, 0, 0, 15}
+}
+
+func decodeVersion(b []byte) (major, minor uint8, build uint16, ok bool) {
+	if len(b) < 8 {
+		return 0, 0, 0, false
+	}
+	return b[0], b[1], uint16(b[2]) | uint16(b[3])<<8, true
+}
+
 // buildTargetInfo constructs AV pairs the way real servers do (impacket
 // and other clients parse them eagerly; an empty list trips some parsers).
-func buildTargetInfo(domain string) []byte {
-	ti := avPair(avNbDomain, domain)
-	ti = append(ti, avPair(avNbComputer, domain)...)
-	ti = append(ti, avPair(avDnsDomain, domain+".local")...)
-	ti = append(ti, avPair(avDnsHostname, domain)...)
+// The domain and the computer are separate names: a server whose NetBIOS
+// domain equals its own hostname is a tell.
+func buildTargetInfo(id Identity) []byte {
+	ti := avPair(avNbDomain, id.NBDomain)
+	ti = append(ti, avPair(avNbComputer, id.NBComputer)...)
+	if id.DNSDomain != "" {
+		ti = append(ti, avPair(avDnsDomain, id.DNSDomain)...)
+	}
+	ti = append(ti, avPair(avDnsHostname, id.DNSHostname)...)
 	ti = append(ti, avPair(avEOL, "")...) // 4-byte EOL: type + zero length
 	return ti
 }
 
+// ntlmChallengeFixedLen is the CHALLENGE header up to but excluding the
+// optional VERSION structure (MS-NLMP 2.2.1.2): signature 8 + message type 4
+// + TargetName fields 8 + flags 4 + server challenge 8 + reserved 8 +
+// TargetInfo fields 8. The payload starts here, or 8 bytes later when a
+// version block is emitted — never at a fixed 56.
+const ntlmChallengeFixedLen = 48
+
 // BuildChallenge constructs an NTLM CHALLENGE (type 2) message with a
-// fresh random server challenge and a decoy domain name.
-func BuildChallenge(targetName string) (msg []byte, challenge [8]byte, err error) {
+// fresh random server challenge, naming the identity's NetBIOS domain.
+func BuildChallenge(id Identity) (msg []byte, challenge [8]byte, err error) {
 	if _, err := rand.Read(challenge[:]); err != nil {
 		return nil, challenge, err
 	}
-	target := utf16Encode(targetName)
-	ti := buildTargetInfo(targetName)
+	target := utf16Encode(id.NBDomain)
+	ti := buildTargetInfo(id)
 
 	flags := uint32(ntlmChallengeFlags)
-	m := make([]byte, 0, 64+len(target)+len(ti))
+	var version []byte
+	if id.Persona.HasVersion {
+		flags |= ntlmNegotiateVersion
+		version = encodeVersion(id.Persona.VerMajor, id.Persona.VerMinor, id.Persona.VerBuild)
+	}
+	// Derived, not hardcoded: a persona that sends no version block puts its
+	// payload 8 bytes earlier, and a stale 56 would still parse while
+	// pointing the client at the wrong bytes.
+	targetOff := ntlmChallengeFixedLen + len(version)
+
+	m := make([]byte, 0, targetOff+len(target)+len(ti))
 	m = append(m, ntlmMagic...)
 	m = le32(m, ntlmTypeChallenge)
 	// TargetName: len, alloc, offset
 	m = le16(m, len(target))
 	m = le16(m, len(target))
-	m = le32(m, 56) // offset after fixed part incl. version block
+	m = le32(m, targetOff)
 	// User flags
 	m = le32(m, int(flags))
 	// Server challenge
@@ -195,9 +246,8 @@ func BuildChallenge(targetName string) (msg []byte, challenge [8]byte, err error
 	// TargetInfo: len, alloc, offset
 	m = le16(m, len(ti))
 	m = le16(m, len(ti))
-	m = le32(m, 56+len(target))
-	// Version block (pretend Windows 10 18362)
-	version := []byte{10, 0, 7, 183, 0, 0, 0, 15}
+	m = le32(m, targetOff+len(target))
+	// Version block, only when NEGOTIATE_VERSION is set
 	m = append(m, version...)
 	// Payloads
 	m = append(m, target...)

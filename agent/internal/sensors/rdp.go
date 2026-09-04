@@ -2,6 +2,7 @@ package sensors
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"io"
 	"log"
@@ -21,10 +22,26 @@ func (RDPSensor) Name() string { return "rdp" }
 func (RDPSensor) Start(ctx context.Context, cfg map[string]interface{}, report Reporter) error {
 	port := intVal(cfg, "port", 3389)
 	tokenID := str(cfg, "token_id", "")
-	return serveTCPSensor(ctx, "rdp", port, tokenID, handleRDPConn, report)
+	id := Resolve(cfg, "rdp")
+	log.Printf("[rdp] identity: persona=%s computer=%s cn=%s", id.Persona.ID, id.NBComputer, id.DNSHostname)
+	// One RSA-2048 keygen per sensor generation, not per connection. NLA is
+	// the default for mstsc and for essentially every RDP scanner, so
+	// generating here would put ~100ms of CPU on the critical path of every
+	// connection — a port sweep against unbounded per-connection goroutines
+	// saturates a vCPU and can blow the TLS handshake deadline, losing the
+	// credential capture the sensor exists for. Still per-identity, still no
+	// shared mutable package state.
+	cert := selfSignedCert(id)
+	if cert == nil {
+		log.Printf("[rdp] certificate generation failed; NLA credential capture disabled")
+	}
+	handle := func(conn net.Conn, tokenID string, report Reporter) {
+		handleRDPConn(conn, tokenID, id, cert, report)
+	}
+	return serveTCPSensor(ctx, "rdp", port, tokenID, handle, report)
 }
 
-func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
+func handleRDPConn(conn net.Conn, tokenID string, id Identity, cert *tls.Certificate, report Reporter) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
@@ -111,7 +128,7 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 	// credential capture is the incident worth having, so only fall back to
 	// reporting the bare connection when that path is not taken.
 	if requested == "credssp(nla)" || requested == "tls+credssp" {
-		tlsConn := upgradeRDPToTLS(conn)
+		tlsConn := upgradeRDPToTLS(conn, cert)
 		if tlsConn != nil {
 			report(Trigger{
 				Sensor:   "rdp",
@@ -120,7 +137,7 @@ func handleRDPConn(conn net.Conn, tokenID string, report Reporter) {
 				Detail:   detail,
 				SeenAt:   time.Now().UTC(),
 			})
-			handleRDPCredSSP(tlsConn, tokenID, report)
+			handleRDPCredSSP(tlsConn, tokenID, id, report)
 			return
 		}
 	}

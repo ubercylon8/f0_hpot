@@ -153,7 +153,8 @@ func runAgent(ctx context.Context, state config.State) {
 			}
 			if !specsEqual(currentSpecs, specs) {
 				currentSpecs = specs
-				sensors.StartAll(toSensors(specs), report)
+				hostname, _ := os.Hostname()
+				sensors.StartAll(toSensors(specs, state.AgentID, hostname), report)
 			}
 			// One-shot token deployments from the console: plant now,
 			// report outcomes on a later heartbeat.
@@ -219,10 +220,20 @@ func releaseArtifactName() string {
 	return name
 }
 
-func toSensors(in []api.SensorSpec) []sensors.SensorSpec {
+// toSensors converts server-delivered specs into runnable ones, injecting
+// the agent's own identity. These two keys are agent-supplied: they
+// overwrite any operator value of the same name, because a sensor must not
+// be able to claim another agent's id.
+func toSensors(in []api.SensorSpec, agentID, hostname string) []sensors.SensorSpec {
 	out := make([]sensors.SensorSpec, 0, len(in))
 	for _, s := range in {
-		out = append(out, sensors.SensorSpec{Kind: s.Kind, Enabled: s.Enabled, Config: s.Config})
+		cfg := make(map[string]interface{}, len(s.Config)+2)
+		for k, v := range s.Config {
+			cfg[k] = v
+		}
+		cfg["agent_id"] = agentID
+		cfg["agent_hostname"] = hostname
+		out = append(out, sensors.SensorSpec{Kind: s.Kind, Enabled: s.Enabled, Config: cfg})
 	}
 	return out
 }
