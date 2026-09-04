@@ -28,8 +28,9 @@ First public release.
   dashboard, tokens, incidents, agents, alert channels, and settings.
 - **Go endpoint agent** (`agent/`) with fleet-managed enrollment,
   heartbeat, and configuration (`agent_sensors` table, delivered over
-  heartbeat rather than local config) covering six sensor kinds
-  (`sensorKindSchema` in `packages/shared/src/agent.ts`): `ssh`,
+  heartbeat rather than local config) covering six sensor kinds (the
+  `kind` enum in `apps/api/src/routes/agents.ts`, matching each sensor's
+  `Name()` in `agent/internal/sensors/`): `ssh`,
   `http_login`, `smb`, `rdp`, `planted_credential`,
   `file_watch`. Self-update manifests are Ed25519-signed and verified
   against an embedded public key before a release is applied
