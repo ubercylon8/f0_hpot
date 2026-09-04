@@ -140,7 +140,7 @@ interesting event would arrive on page four of an inbox.
 ```mermaid
 flowchart LR
     subgraph public["Public internet-facing"]
-        GW["apps/gateway<br/>:80 HTTP · :53 DNS · :25 SMTP"]
+        GW["apps/gateway<br/>:80 HTTP · :53 DNS · :2525 SMTP (opt-in :25)"]
     end
     subgraph internal["Internal"]
         API["apps/api<br/>Fastify + Drizzle"]
@@ -165,9 +165,13 @@ flowchart LR
 It publishes three listeners in production: `:80` for artifact delivery and
 HTTP reach-backs, `:53/udp` as the authoritative nameserver for the delegated
 token zone, and SMTP for email tokens. (Local runs default to unprivileged
-`8080`/`5353`/`2525` via `F0_HTTP_PORT`/`F0_DNS_PORT`/`F0_SMTP_PORT`; email
-tokens triggered by arbitrary internet senders need the real `:25`, since no
-sender will retry on an alternate port.)
+`8080`/`5353` via `F0_HTTP_PORT`/`F0_DNS_PORT`, where production uses the
+privileged `80`/`53`. SMTP is different: `F0_SMTP_PORT` defaults to the
+unprivileged `2525` in every deployment, including production, so the
+installer doesn't collide with a mail server the host may already run.
+Email tokens that must trigger from arbitrary internet senders need to opt
+into the real `:25` instead, since no sender will retry on an alternate
+port — see `docs/INSTALL.md`'s "Mail-server coexistence" section.)
 
 The gateway is the only component whose input is attacker-controlled, so it is
 the only one built under those rules: no shelling out, no mapping of request
