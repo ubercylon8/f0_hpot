@@ -22,6 +22,13 @@ report() { echo "::error file=$1,line=$2::$3"; fail=1; }
 # worked example, at one known line — that single quoted value, in that one
 # file, is exempted below; any other address in that file still fails, so
 # the doc keeps no blind spot for a genuine leak.
+#
+# Parenthesised MS-* specification section numbers ("(MS-CIFS 2.2.4.52.2)")
+# are dotted digits but obviously not addresses, so they are exempted too.
+# The exemption's repeat count is {3,} rather than {3}: it was written when
+# every citation in the tree happened to be four components deep, and a
+# five-component one failed the gate. The `(MS-…` prefix and closing paren
+# are what make it safe — no real leaked address is written that way.
 while IFS=: read -r file line _; do
   [ -z "${file:-}" ] && continue
   report "$file" "$line" "public IPv4 literal — use 203.0.113.10 (RFC 5737)"
@@ -33,7 +40,7 @@ done < <(git grep -InE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' -- . \
   | grep -vE '\b169\.254\.' \
   | grep -vE '\b(192\.0\.2|198\.51\.100|203\.0\.113)\.' \
   | grep -vE '\b(1\.2\.3\.4|5\.6\.7\.8|8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1|1\.0\.0\.1)\b' \
-  | grep -vE '\([A-Z]{2,}-[A-Za-z0-9]+ [0-9]+(\.[0-9]+){3}\)' \
+  | grep -vE '\([A-Z]{2,}-[A-Za-z0-9]+ [0-9]+(\.[0-9]+){3,}\)' \
   | grep -vE '^docs/superpowers/plans/2026-09-03-public-release\.md:[0-9]+:.*198\.18\.7\.7' \
   | grep -vE '\b[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\b.*(version|Version|VERSION)')
 
@@ -46,31 +53,24 @@ done < <(git grep -InE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' -- . \
 # case-insensitive, so a lowercase denylist entry must still catch an uppercase
 # occurrence; without -i this gate silently passed the very strings it exists
 # to block.
-#
-# DEFERRAL, NOT AN EXEMPTION ON THE MERITS: the four agent sensor files named
-# in the skip pattern below hardcode the string as an NTLM challenge target
-# name and an RDP certificate CommonName — 7 lines in total, all under
-# agent/internal/sensors/. These are product constants baked into the agent's
-# on-the-wire behaviour, so renaming them is a maintainer decision with its own
-# compatibility question, deliberately out of scope for the documentation
-# release that added -i. They are NOT safe by nature: they are an operational
-# identifier shipped in the binary, and they should be renamed. Until that
-# decision is made they are skipped by path AND value, so any other occurrence
-# of a denylisted string — including anywhere else in these same four files —
-# still fails.
-#
-# The skip pattern spells the constant FORT[I]KA, with the single-character
-# class matching exactly the letter it encloses. That is deliberate: the
-# pattern would otherwise be a verbatim copy of the string in a tracked file
-# and this gate would flag its own source line. Do not "simplify" the brackets
-# away — the regex means the same thing, but the check starts failing itself.
 for pattern in ${F0_IDENTIFIER_DENYLIST:-}; do
   while IFS=: read -r file line _; do
     [ -z "${file:-}" ] && continue
     report "$file" "$line" "operational identifier matched — use example.com"
-  done < <(git grep -Iin "$pattern" -- . \
-    | grep -vE '^agent/internal/sensors/(smb|smb1|rdp_credssp|ntlm_challenge_test)\.go:[0-9]+:.*(BuildChallenge\("FORT[I]KA(-RDP)?"\)|CommonName: "FORT[I]KA-RDP")')
+  done < <(git grep -Iin "$pattern" -- .)
 done
+
+# The agent ships to hosts an adversary can read. Sensors used to advertise
+# the vendor name in wire fields (SMB computer name, RDP certificate CN),
+# which labelled every honeypot as one. Nothing under agent/ may name the
+# vendor again — not a constant, not a default, not a fallback. This check is
+# unconditional and needs no secret: it is scoped to agent/ precisely because
+# the design documents legitimately name the vendor while recording the
+# removal, and putting the string in the denylist would red-CI those docs.
+while IFS=: read -r file line _; do
+  [ -z "${file:-}" ] && continue
+  report "$file" "$line" "vendor name in agent/ — sensors must not identify themselves"
+done < <(git grep -Iin 'fortika' -- agent/)
 
 if [ "$fail" -eq 0 ]; then echo "no operational identifiers found"; fi
 exit "$fail"

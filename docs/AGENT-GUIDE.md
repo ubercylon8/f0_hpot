@@ -143,6 +143,68 @@ crashing the sensor.
 | `planted_credential` | `agent/internal/sensors/planted.go` | `path` (**required**), `label` (default: `path`), `content` (default: a canned bait file), `interval_seconds` (default `5`) | Writes a bait file (creating parent directories as needed) if it doesn't already exist, then polls its access/modification signature. Any access — read or write — reports a high-severity trigger; a deletion reports once and the sensor stops (re-plant to resume). Subject to limitation 1 above. |
 | `file_watch` | `agent/internal/sensors/filewatch.go` | `path` (**required**), `label` (default: `path`), `interval_seconds` (default `5`), `watch_atime` (bool, default `true`) | Watches an *existing* file you did not create (`/etc/shadow`, a browser cookie store, a KeePass database) for any change to its modification time, and — unless `watch_atime` is set to `false` — its access time. Same read-detection caveat as `planted_credential`. |
 
+### Server personas (`smb` and `rdp`)
+
+A persona (`agent/internal/sensors/persona.go`) is a coherent bundle of
+everything the `smb` and `rdp` sensors advertise about the host they are
+pretending to be — native OS string, NetBIOS/LanMan version fields, and
+DNS suffix — so that no one wire field can contradict another (the defect
+this replaced was a Samba server reporting a Windows build number that
+never existed, with its NetBIOS domain equal to its own computer name).
+`Resolve(cfg, kind)` builds an `Identity` from three config keys, each
+read defensively with a default:
+
+- `persona` — which shipped persona to use; defaults to
+  `windows-server-2019`.
+- `domain` — the NetBIOS/DNS domain the host claims to belong to;
+  defaults to `WORKGROUP`.
+- `hostname` — the host's own name; defaults to the agent's own
+  hostname.
+
+Four personas ship (`Personas()` in `persona.go`): `windows-server-2019`,
+`windows-server-2022`, `windows-11`, and `samba-ubuntu-2204`. The Samba
+persona sets no version block at all (`HasVersion: false`), matching real
+Samba, which never sends `NTLMSSP_NEGOTIATE_VERSION`. An unrecognized
+`persona` value falls back to the default and logs a message rather than
+failing the sensor.
+
+Setting `domain` to a real Active Directory domain name is what makes
+these honeypots convincing inside an enterprise: a server claiming
+membership in a domain that is not the intruder's own is discounted
+immediately, while `windows-server-2019` inside `WORKGROUP` reads as
+just another unmanaged box.
+
+One limitation is intentional and recorded here so it isn't "fixed" by
+accident: Windows has shipped with SMB1 disabled by default since 2017,
+so a host that answers SMB1 while claiming a modern Windows persona is
+mildly implausible. The SMB1 path (`agent/internal/sensors/smb1.go`)
+exists deliberately anyway, because it is what captures NTLMv1 responses
+from legacy clients that still speak it.
+
+### Known protocol gaps
+
+Three defects in the SMB and NTLM wire encodings are known and deliberately
+deferred, not overlooked. All three predate the persona work. They are
+recorded here because a honeypot whose whole premise is "no wire field may
+lie about another" should not keep its own known lies in a private file.
+
+- **SMB2 negotiate response field layout is off by eight bytes.**
+  `buildSMB2NegotiateResponse` (`agent/internal/sensors/smb.go`) writes
+  `SecurityBufferOffset`/`SecurityBufferLength` at body offsets 48 and 50,
+  where MS-SMB2 2.2.4 places `ServerStartTime`; the real fields at 56 and 58
+  are left zero. A conformant client therefore sees no security buffer.
+  Capture still works, because clients send their own NTLM NEGOTIATE
+  regardless of what the negotiate response advertises.
+- **The SMB1 legacy negotiate response omits `DomainName`.** The spec
+  (MS-CIFS 2.2.4.52.2) puts a null-terminated `DomainName` after the
+  challenge key; `agent/internal/sensors/smb1.go` sends only the key. If it
+  is added it should carry the identity's NetBIOS domain (`id.NBDomain`),
+  not a constant.
+- **The NTLM CHALLENGE sets neither `TARGET_TYPE_DOMAIN` nor
+  `TARGET_TYPE_SERVER`.** Real servers set one of the two to describe what
+  `TargetName` holds; `BuildChallenge` (`agent/internal/sensors/ntlm.go`)
+  sets neither.
+
 ## Configuration delivery and generation restarts
 
 Sensor configuration is fleet-managed from the console, not from local

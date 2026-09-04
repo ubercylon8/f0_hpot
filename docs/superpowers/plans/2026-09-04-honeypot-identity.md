@@ -13,7 +13,10 @@
 ## Global Constraints
 
 - **Go 1.26.5** (`agent/go.mod:3`). Node ≥22, pnpm 11.23.0 for the console task.
-- **Apache-2.0 SPDX headers on new source files** (`.go`, `.ts`, `.mjs`). Markdown carries none.
+- **Licence headers follow existing practice, which excludes Go.** No `.go` file in this
+  repository carries an SPDX header (verified: 0 of 43). `.mjs` and `.sh` files do. Add none
+  to the new Go files. `CLAUDE.md` and `AGENTS.md` state the convention more broadly than the
+  repository follows it; that discrepancy is recorded for the maintainer and is out of scope here.
 - **The weak NTLM negotiation flags are deliberate and must survive.** `agent/internal/sensors/ntlm.go:25-27` withholds key exchange and strong crypto so clients fall back to crackable NTLMv1/v2 responses. That is the sensor's purpose. Only `NEGOTIATE_VERSION` (`0x02000000`) becomes persona-controlled; every other bit in `ntlmChallengeFlags` stays exactly as it is.
 - **No real operational identifiers in any tracked file.** `./scripts/ci/check-identifiers.sh` must exit 0 before every commit.
 - **`pnpm build` precedes `pnpm typecheck`/`pnpm test`** (turbo `dependsOn: ["^build"]`).
@@ -385,7 +388,7 @@ Claude-Session: https://claude.ai/code/session_01Lu7VJWLy1AETmnLjdaGi6M"
 - Consumes: `Identity`, `Resolve` from Task 1.
 - Produces:
   ```go
-  func encodeVersion(major, minor uint8, build uint16) []byte  // 8 bytes, MS-NLMP 2.2.2.10
+  func encodeVersion(major, minor uint8, build uint16) []byte  // 8 bytes (MS-NLMP 2.2.2.10)
   func decodeVersion(b []byte) (major, minor uint8, build uint16, ok bool)
   func BuildChallenge(id Identity) (msg []byte, challenge [8]byte, err error)
   func buildTargetInfo(id Identity) []byte
@@ -503,7 +506,7 @@ const ntlmChallengeFlags = 0x00008201 // NEGOTIATE_NTLM | REQUEST_TARGET | NEGOT
 
 const ntlmNegotiateVersion = 0x02000000
 
-// encodeVersion renders MS-NLMP 2.2.2.10 VERSION. The build is a
+// encodeVersion renders the VERSION structure (MS-NLMP 2.2.2.10). The build is a
 // little-endian uint16; writing those two bytes by hand is how this file
 // came to advertise build 46855.
 func encodeVersion(major, minor uint8, build uint16) []byte {
