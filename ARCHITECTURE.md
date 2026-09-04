@@ -171,10 +171,18 @@ sender will retry on an alternate port.)
 
 The gateway is the only component whose input is attacker-controlled, so it is
 the only one built under those rules: no shelling out, no mapping of request
-paths onto the filesystem, size caps on every input, all enforced by semgrep
-rules that block CI. Keeping that surface to exactly one process is the point —
-every other component gets to assume its input came from something that already
-authenticated.
+paths onto the filesystem, size caps on every input. Keeping that surface to
+exactly one process is the point — every other component gets to assume its
+input came from something that already authenticated.
+
+Those are design rules the current code upholds by construction rather than
+checks a tool applies for you. `apps/gateway/src/artifacts.ts` imports no
+filesystem or path module at all, and nothing in the gateway spawns a process.
+`.semgrep.yml` does declare `gateway-no-exec` and `gateway-no-fs-from-request`,
+but both are written against Go patterns for a directory that contains only
+TypeScript, so neither can match; there is no rule covering the size caps
+either. Treat these three rules as reviewer obligations on every gateway
+change, not as something CI will catch.
 
 The gateway also holds almost nothing worth stealing. No database, no console
 credentials. It carries one shared secret (`F0_INTERNAL_SECRET`) whose scope is
@@ -196,9 +204,13 @@ must arrive unproxied for the source IP to mean anything.
 
 The **MCP server** is the same management and triage surface exposed to an LLM
 over stdio or streamable HTTP. It calls the API like any other client and gets
-no privileges the console does not have. Its tool schemas come from the same
-zod definitions the API validates against (`packages/shared`), so the two can
-never drift into disagreeing about a shape.
+no privileges the console does not have. Its tool schemas are *intended* to come
+from the same zod definitions the API validates against (`packages/shared`), but
+today they do not: `apps/mcp` depends on the MCP SDK and zod only, declares no
+workspace dependency, and hand-writes its tool shapes — including the token-type
+enum. So the MCP surface can drift from the API, and adding a token type means
+editing it by hand. That is the reason invariant 7 below lists four places to
+update rather than three.
 
 ### Endpoints dial out; nothing dials in
 
@@ -237,9 +249,19 @@ stateDiagram-v2
 environment-configured one or a managed, hash-stored, optionally expiring token
 minted in the console — and receives an agent id and a long-lived agent key.
 Re-enrolling the same host replaces its key rather than creating a duplicate.
-The resulting state is stored machine-wide, not per-user: enrollment is run by
-an interactive administrator while the service runs as a system account, and
-per-user state leaves the service permanently "not enrolled".
+
+Where that state lands is platform-specific, and both cases exist for a
+reason. On **Windows** it is machine-wide (`%PROGRAMDATA%\f0-deception`):
+enrollment is run by the interactive administrator while the service runs as
+LocalSystem, whose profile is a different directory entirely, so a per-user path
+left the service permanently "not enrolled" — agents enrolled before the service
+existed are migrated from the old per-user path once. On **unix** it stays under
+the invoking user's home, falling back to the passwd home and then `/root`. The
+fallbacks are not cosmetic: systemd starts services with no `HOME`, which makes
+`os.UserHomeDir()` fail outright and used to crash-loop the unit with
+"load state: $HOME is not defined". The generated systemd unit therefore pins
+`Environment=HOME=…` so the service resolves the same directory the operator
+enrolled into.
 
 **Active.** Each heartbeat reports the running version and receives the poll
 interval, the sensor set, and any pending deployments. The agent restarts its
@@ -309,8 +331,10 @@ request path onto the filesystem is a traversal bug waiting to be written.
 Storing artifacts as rows removes the category: there is no path to normalise,
 no symlink to follow, no directory to escape. It also makes tokens portable —
 a backup of the database is a complete backup of every artifact — and lets the
-stateless gateway be redeployed or replicated freely. This is enforced, not
-merely intended: semgrep rules block filesystem access driven by request data.
+stateless gateway be redeployed or replicated freely. Nothing checks this for
+you — the semgrep rules that were meant to are inert (see
+[Components](#components)) — so it is a rule reviewers enforce. The gateway
+currently upholds it: no module under `apps/gateway/src/` touches the filesystem.
 
 **4. Agent-reported incidents bypass type rules and carry their own severity.**
 An event with `event.detail.sensor` set is a full-interaction detection: a
@@ -352,10 +376,10 @@ enum, the tokens-core definition and registry, the console's type list, and the
 MCP tool enum.
 
 Two more that are conventions rather than mechanisms, but break things just as
-effectively: cross-app data shapes live only in `packages/shared` zod schemas
-(the API and the MCP server validate against the same definitions and cannot
-drift), and configuration comes from `F0_*` environment variables with no
-secrets in code.
+effectively: cross-app data shapes belong in `packages/shared` zod schemas —
+the API and console validate against those definitions, while `apps/mcp` still
+redeclares its own copies and so has to be kept in step by hand — and
+configuration comes from `F0_*` environment variables with no secrets in code.
 
 ## Where to look
 
