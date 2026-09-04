@@ -6,10 +6,13 @@ innocuous-looking but alerts the moment someone (or something) touches it.
 This page is the reference for what each type actually plants, what trips
 it, how severe that trip is scored, and where it's worth deploying.
 
-Every type is defined in `packages/tokens-core/src/` as one file
-implementing `generate()` (produces the artifact) and `matchTrigger()`
-(decides whether an incoming gateway event is a real hit, and at what
-severity). The gateway (`apps/gateway`) only recognizes the token id in
+Every type is defined in `packages/tokens-core/src/` as a single
+`TokenTypeDefinition` implementing `generate()` (produces the artifact) and
+`matchTrigger()` (decides whether an incoming gateway event is a real hit,
+and at what severity). Related types are grouped a few to a file —
+`network-tokens.ts`, `document-tokens.ts`, `pdf-clone-tokens.ts`,
+`cloud-tokens.ts` — and all of them are listed in `registry.ts`. The gateway
+(`apps/gateway`) only recognizes the token id in
 attacker-controlled input and forwards a candidate event; the API
 (`apps/api`) is what actually runs `matchTrigger` and creates the incident.
 

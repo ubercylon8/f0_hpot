@@ -32,21 +32,25 @@ f0_hpot runs two halves into one pipeline:
   hosts you control.
 
 Both converge on the same incident record and the same alert fan-out, so
-triage does not care which half fired. The gateway forwards *candidates*; the
-API is the sole trigger authority and runs each token type's own match rules
-before recording anything. [ARCHITECTURE.md](ARCHITECTURE.md) walks the whole
-flow and the invariants behind it.
+triage does not care which half fired. The gateway forwards *candidates*, never
+verdicts: every gateway-forwarded event has to satisfy the token type's own
+match rules at the API before it becomes an incident, and the severity comes
+from that match. Agent detections take the other branch — a sensor that watched
+an SSH credential attempt has no artifact URL to match on, so it reports
+against a managed token id and carries its own severity.
+[ARCHITECTURE.md](ARCHITECTURE.md) walks the whole flow and the invariants
+behind it.
 
 ## What ships
 
 | Component | State |
 |---|---|
-| `apps/gateway` | Public trigger catcher — HTTP catch-all, authoritative DNS, SMTP. The only component that faces the internet. |
+| `apps/gateway` | Public trigger catcher — HTTP catch-all, authoritative DNS, SMTP. The only thing that *should* face the internet, and the only component whose input is attacker-controlled. |
 | `apps/api` | Trigger authority and source of truth: tokens, incidents, agents, alert channels, API keys. Fastify + Drizzle + SQLite (WAL). |
 | `apps/web` | React 19 + Vite + Tailwind console: dashboard, tokens, incidents, agents, alert channels, settings. |
 | `apps/mcp` | MCP server over stdio and streamable HTTP — 8 management and triage tools for an LLM client. |
 | `agent/` | Go endpoint agent: enroll, heartbeat, fleet-managed sensors. Runs as a systemd unit or a Windows SCM service, with Ed25519-signed self-update and a 5-platform cross-build. |
-| `packages/tokens-core` | The 16 token types. Each is one file pairing `generate()` with the `matchTrigger()` that detects it. |
+| `packages/tokens-core` | The 16 token types, each a single `TokenTypeDefinition` pairing `generate()` with the `matchTrigger()` that detects it. |
 | `packages/shared` | zod schemas for shapes that cross app boundaries — validated against by the API and the console. |
 
 **16 token types** ([reference](docs/TOKEN-TYPES.md)): `web_bug`,
@@ -95,7 +99,7 @@ advantage and it does not go away because you self-host.
 | Endpoint honeypots | SSH / SMB / RDP / HTTP-login sensors | Not offered |
 | Fleet management | Console-managed agents | n/a |
 | SIEM forwarding | Syslog, Elasticsearch, Loki, webhook | Email, mostly |
-| Scale | Unlimited tokens | Fine, until you want hundreds under your own name |
+| Licensing | No per-token licensing | Free, but on someone else's terms |
 
 If you want one canary in a document this afternoon, use a hosted service. If
 you want a hundred decoys across an estate, on your own domain, feeding your
@@ -132,12 +136,13 @@ F0_GATEWAY_ORIGIN=http://localhost:18080 \
   npx tsx src/server.ts
 ```
 
-Both must agree on `F0_TOKEN_DOMAINS`, and `localhost` has to be in the list
-so generated artifacts point somewhere you can actually reach. With no
+Both must agree on `F0_TOKEN_DOMAINS`, and `localhost` has to be **first** in
+the list: the API builds every artifact from the first entry, so anything else
+in front of it produces tokens pointing at a name you cannot reach. With no
 `F0_ADMIN_TOKEN` set and no API keys created, the API logs a loud warning and
 runs unauthenticated — fine for this demo, not for anything reachable.
 
-Now plant a token and trip it:
+Terminal 3 — plant a token and trip it:
 
 ```sh
 curl -s -X POST localhost:18443/api/v1/tokens \
@@ -170,8 +175,13 @@ curl -s localhost:18443/api/v1/incidents
 That is a real detection: the gateway caught the request, the API confirmed it
 against the `web_bug` type's own rules, graded it, and recorded it.
 
-DNS tokens work the same way against the gateway's resolver — `dig +short -p
-15353 @127.0.0.1 <id>.tokens.example.com` produces a `high`-severity incident.
+DNS tokens work the same way against the gateway's resolver. Creating one
+returns a `Trigger hostname` artifact built from the first token domain —
+`<id>.localhost` here — and resolving it fires a `high`-severity incident:
+
+```sh
+dig +short -p 15353 @127.0.0.1 <id>.localhost
+```
 
 For the console:
 
