@@ -43,14 +43,24 @@ until you create the first API key with it (Settings), so store it.
 ## DNS records (the installer prints and verifies these)
 
 ```text
-A    ns1.<token-domain>    → <your-ip>        # gateway nameserver identity
-NS   <token-domain>        → ns1.<token-domain>
-A    *.<token-domain>      → <your-ip>        # wildcard → host (HTTP URLs)
-MX   <mail-domain>         → ns1.<token-domain>  (priority 10)
+A    ns1.<token-domain>    → <your-ip>        # glue: gateway nameserver address
+NS   <token-domain>        → ns1.<token-domain>  # delegates the token zone to the gateway
+MX   <mail-domain>         → ns1.<token-domain>  (priority 10)  # only when mail-domain sits outside the token zone
 A    <console-domain>      → <your-ip>        # only for public console
 ```
 
-Verification runs `dig` against 8.8.8.8 per record with retry/skip/abort.
+No wildcard `A` record — once the `NS` record is live the gateway's own DNS
+server answers every name under the delegated zone itself, so a wildcard at
+the parent would just be occluded by the delegation and do nothing. NS
+values must be hostnames, not IPs. See `docs/INSTALL.md` § "DNS: delegation,
+not a record in your existing zone" for the full explanation of why a plain
+record in an existing zone can't work here.
+
+Verification queries the parent zone's authoritative nameserver directly,
+not a recursive resolver: 8.8.8.8 is used only to find *which* nameserver
+is authoritative for the parent zone, then every record check goes straight
+to it — a recursive lookup would instead follow the (not-yet-live)
+delegation to the gateway and fail. Retries with retry/skip/abort.
 
 ## Signing prerequisites
 
