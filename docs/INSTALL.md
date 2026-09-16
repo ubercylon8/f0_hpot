@@ -18,7 +18,7 @@ your LAN. DNS and email tokens need extra steps noted below.
 ### 1. Build
 
 ```sh
-git clone <repo> f0_deception && cd f0_deception
+git clone https://github.com/ubercylon8/f0_hpot && cd f0_hpot
 pnpm install
 pnpm build            # builds api, gateway, web, mcp
 (cd agent && go build -o /tmp/f0-deception-agent .)
@@ -30,19 +30,42 @@ Use distinct shells, or append `&`:
 
 ```sh
 # Terminal 1 — API (console backend) on :18443
+F0_API_PORT=18443 F0_DB_PATH=/tmp/f0-demo.db \
+F0_ENROLLMENT_TOKEN=bootstrap-test-123 \
+F0_GATEWAY_ORIGIN=http://localhost:18080 \
+F0_TOKEN_DOMAINS=localhost,tokens.example.com \
 pnpm --filter @f0/deception-api dev
 
 # Terminal 2 — Gateway on :18080 (HTTP triggers) + :15353/udp (DNS)
-F0_API_BASE_URL=http://localhost:18443 \
+F0_API_BASE_URL=http://127.0.0.1:18443 \
 F0_HTTP_PORT=18080 F0_DNS_PORT=15353 \
+F0_TOKEN_DOMAINS=localhost,tokens.example.com \
+F0_GATEWAY_ORIGIN=http://localhost:18080 \
 pnpm --filter @f0/deception-gateway dev
 
-# Console UI: open apps/web/index.html via any static server, e.g.
-npx serve apps/web   # then open http://localhost:3000
+# Terminal 3 — Console (Vite dev server) on :5173
+F0_API_PORT=18443 pnpm --filter @f0/deception-web dev
 ```
 
-> The gateway needs `F0_API_BASE_URL` pointing at the API so it can forward
-> trigger events.
+Then open <http://localhost:5173>.
+
+> **Four things this block gets wrong if you trim it:**
+>
+> - **`F0_API_PORT` is not optional on the API.** Without it the server binds
+>   its default `:8443`, and every other command here — the gateway's
+>   `F0_API_BASE_URL`, the `$F0` exports below — points at `:18443` and finds
+>   nothing listening.
+> - **The console has to be the Vite dev server, not a static file server.**
+>   `apps/web/index.html` loads `/src/main.tsx`, which no browser can execute;
+>   serving the directory statically renders a blank page. Vite also proxies
+>   `/api` to `F0_API_PORT`, so that variable has to match the API's port here
+>   too — without the proxy the console loads but every request 404s.
+> - **`F0_ENROLLMENT_TOKEN` has to be set before step 3.** It is the
+>   credential `--enroll bootstrap-test-123` presents; unset, enrollment is
+>   rejected.
+> - **`localhost` must come first in `F0_TOKEN_DOMAINS`.** The API builds
+>   every artifact URL from the first entry, so any other order produces
+>   tokens pointing at a name you cannot reach from this machine.
 
 ### 3. Enroll an agent + deploy honeypots
 
@@ -54,21 +77,26 @@ curl -s $F0/api/v1/agents   # empty until you enroll
 /tmp/f0-deception-agent --server $F0 --enroll bootstrap-test-123
 
 # deploy sensors via the console (Agents tab → sensor editor),
-# or via API:
+# or via API. Leave token_id out: the API mints one honeypot token per
+# sensor, memoed "<host> · <kind>", so there is no token to create first.
 AID=$(curl -s $F0/api/v1/agents | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["id"])')
-TID=$(curl -s -X POST $F0/api/v1/tokens -H 'content-type: application/json' \
-      -d '{"type":"web_bug","memo":"honeypot link"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
 
 curl -s -X PUT $F0/api/v1/agents/$AID/sensors -H 'content-type: application/json' -d '{
   "sensors": [
-    {"kind":"ssh","enabled":true,"config":{"port":12222,"token_id":"'"$TID"'"}},
-    {"kind":"http_login","enabled":true,"config":{"port":18081,"token_id":"'"$TID"'"}},
-    {"kind":"smb","enabled":true,"config":{"port":1445,"token_id":"'"$TID"'"}},
-    {"kind":"rdp","enabled":true,"config":{"port":13389,"token_id":"'"$TID"'"}}
+    {"kind":"ssh","enabled":true,"config":{"port":12222}},
+    {"kind":"http_login","enabled":true,"config":{"port":18081}},
+    {"kind":"smb","enabled":true,"config":{"port":1445}},
+    {"kind":"rdp","enabled":true,"config":{"port":13389}}
   ]}'
 
 /tmp/f0-deception-agent    # run the agent (foreground)
 ```
+
+> Set `token_id` explicitly only when you want several sensors reporting
+> against one shared token — create a `honeypot`-type token for that and
+> paste its id. A supplied id must name an **active** token or the whole save
+> is rejected, which is deliberate: a sensor pointed at a revoked or
+> mistyped token would swallow every detection it makes.
 
 ### 4. Fire a test attack
 
@@ -109,18 +137,34 @@ Open the console → **Incidents** appear within seconds.
   configurable — see "Mail-server coexistence" below). The **console**
   is `:443` only (or loopback `:8080` in private mode) — see
   `deploy/docker-compose.yml`.
-- Docker + Docker Compose (the installer drives this), OR Node 22 + Go
-  directly for a bare-metal install
+- **Node.js ≥ 20 on the host** — to run the installer, which is a Node
+  script and therefore the one dependency it cannot install for you. `node
+  -v` has to print v20 or newer; Debian/Ubuntu's `nodejs` package is
+  sometimes older than that, in which case install from
+  [NodeSource](https://github.com/nodesource/distributions) or `nvm` first.
+  Nothing else on the host needs Node: the platform runs on the Node 22
+  baked into the container images. (The bare-metal path below skips the
+  installer, but then needs Node 22 + Go on the host proper.)
+- Docker + Docker Compose — the installer checks for these and offers to
+  install them on Debian/Ubuntu. For a bare-metal install instead (no
+  Docker), you need Node 22 + Go on the host and run the services directly;
+  see "Bare metal" below.
 
 ### Automated install (recommended)
 
 ```sh
-git clone <repo> f0_deception && cd f0_deception
+git clone https://github.com/ubercylon8/f0_hpot && cd f0_hpot
 node deploy/install.mjs
 ```
 
-This is a zero-dependency TUI (`deploy/install.mjs`) that drives the whole
-deployment in phases:
+> `node: command not found`? Install Node.js ≥ 20 first — see Prerequisites
+> above. The installer is a Node script, so it is the only dependency it
+> cannot bootstrap for you; it installs the rest (Docker, `dig`, `openssl`)
+> itself on Debian/Ubuntu.
+
+This is a zero-dependency TUI (`deploy/install.mjs`) — zero dependencies
+meaning it imports only Node builtins, so it runs on a fresh clone with no
+`pnpm install` beforehand. It drives the whole deployment in phases:
 
 1. **Preflight** — checks for `docker`, the compose plugin, `git`,
    `openssl`, `curl`, `dig` (offers to `apt-get install` anything missing

@@ -205,15 +205,38 @@ A real deployment needs three things:
   `A ns1.tokens.example.com → 203.0.113.10`. No wildcard record: the gateway
   is authoritative and answers every name under the zone.
 
+With those in place, one command deploys the whole stack:
+
+```sh
+node deploy/install.mjs
+```
+
+A zero-dependency TUI: it imports nothing but Node builtins, so there is no
+`pnpm install` to do first. It runs preflight (offering to `apt-get` any
+missing Docker, `dig` or `openssl`), asks for your domain and exposure mode,
+generates the secrets into `deploy/.env`, prints the DNS records and verifies
+them against the parent zone's authoritative nameserver, then brings up Docker
+Compose and health-checks it. Two flags: `--dry-run` writes `deploy/.env` and
+the Caddyfile and stops before `docker compose up`; `--reconfigure` re-asks
+every question while preserving the generated secrets.
+
+**Node.js ≥ 20 has to be on the host already** — it is the one dependency the
+installer cannot install for you, being a Node script itself. Everything else,
+including the Node 22 that actually runs the platform, lives in the containers.
+
 The console binds to loopback and is meant to be reached over an SSH tunnel;
 publishing it behind TLS is an explicit opt-in. Full walkthrough, including
-Docker Compose and the agent fleet, is in [docs/INSTALL.md](docs/INSTALL.md).
+the agent fleet, is in [docs/INSTALL.md](docs/INSTALL.md); day-2 operations —
+following logs, rebuilding after an upgrade, backing up the incident database —
+are in [deploy/README.md](deploy/README.md).
 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — trigger flow, component boundaries,
   agent lifecycle, and the invariants with the reason each exists.
 - [docs/INSTALL.md](docs/INSTALL.md) — local test setup and production VPS deploy.
+- [deploy/README.md](deploy/README.md) — the installer's questions and the DNS
+  records it asks for, the port/exposure topology, and day-2 operations.
 - [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — day-to-day: plant tokens, read
   alerts, run honeypots.
 - [docs/TOKEN-TYPES.md](docs/TOKEN-TYPES.md) — all 16 types: what each plants,

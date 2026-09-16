@@ -6,12 +6,14 @@
 node deploy/install.mjs
 ```
 
-A zero-dependency TUI (Node ≥ 20, nothing to install first) that walks the
-whole deployment: preflight (with **automatic dependency installation**
-on Debian/Ubuntu — it offers the exact `apt-get` command before running
-it) → questions → secrets → DNS records (verified) → binaries/GeoIP →
-`docker compose up` → health checks → first-run card with your console
-URL and admin token.
+A zero-dependency TUI that walks the whole deployment. "Zero-dependency"
+means it imports only Node builtins — no `pnpm install` on a fresh clone —
+but **Node.js ≥ 20 does have to be on the host**, since the installer is a
+Node script and cannot bootstrap its own runtime. It handles the rest:
+preflight (with **automatic dependency installation** on Debian/Ubuntu — it
+offers the exact `apt-get` command before running it) → questions → secrets
+→ DNS records (verified) → binaries/GeoIP → `docker compose up` → health
+checks → first-run card with your console URL and admin token.
 
 Flags: `--reconfigure` (re-ask everything, secrets preserved),
 `--dry-run` (write `.env` + `Caddyfile`, stop before compose up).
