@@ -21,8 +21,8 @@
     "e2e": "node scripts/e2e/dashboard-ui.mjs && node scripts/e2e/tokens-ui.mjs && node scripts/e2e/incidents-ui.mjs && node scripts/e2e/agents-ui.mjs && node scripts/e2e/channels-ui.mjs && node scripts/e2e/settings-ui.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.62.1",
-    "turbo": "^2.10.11",
+    "playwright": "^1.63.0",
+    "turbo": "^2.11.2",
     "typescript": "^5.9.0"
   }
 }
