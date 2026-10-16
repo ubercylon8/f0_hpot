@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/gliderlabs/ssh v0.3.8
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
