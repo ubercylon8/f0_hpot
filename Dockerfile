@@ -1,5 +1,5 @@
 # Shared build: pnpm workspace
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 RUN corepack enable && corepack prepare pnpm@11.23.0 --activate
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY apps/web/ apps/web/
 RUN pnpm build
 
 # --- API ---
-FROM node:22-slim AS api
+FROM node:26-slim AS api
 # Code signing runs on the API host: openssl for key/cert handling and the
 # Ed25519 release manifests, osslsigncode for Authenticode. Shipping them
 # here means the console's signing features work on a fresh install instead
@@ -36,7 +36,7 @@ EXPOSE 8443
 CMD ["node", "apps/api/dist/server.js"]
 
 # --- Gateway ---
-FROM node:22-slim AS gateway
+FROM node:26-slim AS gateway
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
@@ -46,7 +46,7 @@ EXPOSE 80 53/udp 2525
 CMD ["node", "apps/gateway/dist/server.js"]
 
 # --- Web (static, served by Caddy in production) ---
-FROM node:22-slim AS web-build
+FROM node:26-slim AS web-build
 WORKDIR /app
 COPY --from=build /app/apps/web/dist ./dist
 FROM caddy:2-alpine AS web
